@@ -2,6 +2,7 @@
 title: Kaggle部署Stable-Diffusion
 date: 2025-09-29 10:26:50
 tags: Stable-Diffusion
+categories: 杂技
 ---
 
 ​	炼图初步。九品炼图师中期巅峰半步大圆满境。

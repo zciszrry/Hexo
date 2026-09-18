@@ -3,6 +3,7 @@ title: Markdown语法
 date: 2025-08-21 11:44:40
 tags: Markdown
 mathjax: true
+categories: 杂技
 ---
 
 ### 斜体
