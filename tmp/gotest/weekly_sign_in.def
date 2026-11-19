@@ -1,0 +1,9 @@
+table TWeeklySignIn {
+    uid                      uint64                  @0  comment:"uid"
+    signData                 Array<int64>            @1  comment:"签到数据，大小为7的数组，记录签到时间戳，未签到为-1"
+    getFiveConsReward        int32                   @2  comment:"是否领取过连签奖励;0未领取；1已经领取过"
+    weekStartTime            int64                   @3  comment:"本周开始时间戳（秒）"
+
+    primary         (uid)           comment:"主键"
+    lock            type:user       column:uid
+}engine:InnoDb charset:UTF8

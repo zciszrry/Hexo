@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>SLG 地图系统全景详解</title>
+    <style>
+        :root {
+            --bg: #f4f6f8;
+            --card-bg: #ffffff;
+            --primary: #2563eb;
+            --secondary: #475569;
+            --accent: #059669;
+            --danger: #dc2626;
+            --warning: #d97706;
+            --border: #e2e8f0;
+            --text: #1e293b;
+            --text-muted: #64748b;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            color: var(--primary);
+            margin-bottom: 8px;
+        }
+        .subtitle {
+            text-align: center;
+            color: var(--text-muted);
+            margin-bottom: 32px;
+            font-size: 14px;
+        }
+        .layer {
+            background: var(--card-bg);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            padding: 20px 24px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+            position: relative;
+            overflow: hidden;
+        }
+        .layer::before {
+            content: attr(data-layer);
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: var(--primary);
+        }
+        .layer-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        .layer-num {
+            background: var(--primary);
+            color: #fff;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+        .layer-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text);
+            margin: 0;
+        }
+        .layer-desc {
+            color: var(--text-muted);
+            font-size: 13px;
+            margin-left: 38px;
+            margin-bottom: 12px;
+        }
+        .tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-right: 6px;
+            margin-bottom: 4px;
+            background: #e0e7ff;
+            color: #3730a3;
+        }
+        .tag.engine { background: #dbeafe; color: #1e40af; }
+        .tag.cache { background: #d1fae5; color: #065f46; }
+        .tag.push { background: #fee2e2; color: #991b1b; }
+        .tag.entity { background: #fef3c7; color: #92400e; }
+        .tag.commiter { background: #f3e8ff; color: #6b21a8; }
+        code {
+            background: #f1f5f9;
+            padding: 1px 5px;
+            border-radius: 4px;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 12px;
+            color: #334155;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            margin-top: 8px;
+        }
+        th, td {
+            text-align: left;
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--border);
+        }
+        th {
+            background: #f8fafc;
+            font-weight: 600;
+            color: var(--secondary);
+        }
+        .highlight-box {
+            background: #f0f9ff;
+            border: 1px solid #bae6fd;
+            border-radius: 8px;
+            padding: 14px 18px;
+            margin-top: 14px;
+            font-size: 13px;
+        }
+        .mermaid {
+            text-align: center;
+            margin: 14px 0;
+        }
+        ul.compact {
+            margin: 6px 0;
+            padding-left: 20px;
+            font-size: 13px;
+        }
+        ul.compact li {
+            margin-bottom: 4px;
+        }
+        .relation-summary {
+            background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
+            border: 1px solid #bfdbfe;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin-top: 24px;
+        }
+        .relation-summary h3 {
+            margin-top: 0;
+            color: var(--primary);
+        }
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        @media (max-width: 768px) {
+            .two-col { grid-template-columns: 1fr; }
+        }
+    </style>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({ startOnLoad: true });
+    </script>
+</head>
+<body>
+    <div class="container">
+        <h1>SLG 地图系统全景详解</h1>
+        <div class="subtitle">基于代码如实总结 · 八层分层架构 · 自底向上展开</div>
+
+        <!-- Layer 1 -->
+        <div class="layer" data-layer="1">
+            <div class="layer-header">
+                <div class="layer-num">1</div>
+                <div class="layer-title">空间划分（Spatial Partition）</div>
+            </div>
+            <div class="layer-desc">地图最底层坐标系统，提供高效的区域查询与并发控制能力</div>
+            <table>
+                <tr><th>单元</th><th>尺寸</th><th>说明</th><th>核心操作</th></tr>
+                <tr>
+                    <td><code>Grid</code></td>
+                    <td>1×1（最小单位）</td>
+                    <td>地图最小坐标单元，默认整张地图为 <code>512×512</code> Grid，边长 <code>GRID_LENGTH=100</code>（用于距离计算）</td>
+                    <td><code>CalcGrid(x,y)</code> / <code>ParseGrid(id)</code></td>
+                </tr>
+                <tr>
+                    <td><code>Block</code></td>
+                    <td>8×8 Grid</td>
+                    <td>默认整张地图包含 <code>64×64</code> Block；是<strong>并发锁的最小粒度</strong>（按 BlockId 排序加锁）</td>
+                    <td><code>GetBlockByGrid(grid)</code></td>
+                </tr>
+                <tr>
+                    <td><code>Zone</code></td>
+                    <td>逻辑分组</td>
+                    <td>策划配置的区域，包含一组 Grid/Block，用于刷怪、刷矿、出生点分配等业务逻辑</td>
+                    <td>配置驱动加载</td>
+                </tr>
+            </table>
+            <div class="highlight-box">
+                <strong>并发设计：</strong>World Service 对对象增删改时，以对象占据的所有 <code>Block</code> 为粒度进行排序加锁（<code>lockBlocks</code>），避免死锁同时保证多对象操作安全。
+            </div>
+        </div>
+
+        <!-- Layer 2 -->
+        <div class="layer" data-layer="2">
+            <div class="layer-header">
+                <div class="layer-num">2</div>
+                <div class="layer-title">地图对象（静态实体）</div>
+            </div>
+            <div class="layer-desc">放置于 Grid 上的静态实体，统一实现 <code>world.IObj</code> 接口</div>
+            <div class="two-col">
+                <div>
+                    <span class="tag entity">UserCity</span>
+                    <span class="tag entity">Monster</span>
+                    <span class="tag entity">Resource</span>
+                    <span class="tag entity">SystemCity</span>
+                    <span class="tag entity">GuildBuilding</span>
+                    <span class="tag entity">Tent</span>
+                    <span class="tag entity">Tomb</span>
+                    <span class="tag entity">IntelTreasure</span>
+                </div>
+                <div style="font-size:13px;color:var(--text-muted);">
+                    所有对象通过 <code>world.IObj</code> 统一描述：
+                    <ul class="compact">
+                        <li><code>GetCenterGrid() / GetOccupyGrids()</code>：占据的格子</li>
+                        <li><code>GetObjectType() / GetTid()</code>：类型与模板ID</li>
+                        <li><code>GetObjWidth() / GetObjHeight()</code>：尺寸（支持多格占据）</li>
+                        <li><code>Same(other)</code>：对象一致性校验</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="highlight-box">
+                <strong>格子特性：</strong>Grid 分为 <code>EGridTypeNormal</code>（可放任意对象）、<code>EGridTypeSpecific</code>（仅特定类型）、<code>EGridTypeUnavailable</code>（不可放置）。对象创建前需先 <code>ReserveGrids</code> 预占格子并获取 ticket，创建时凭 ticket 校验。
+            </div>
+        </div>
+
+        <!-- Layer 3 -->
+        <div class="layer" data-layer="3">
+            <div class="layer-header">
+                <div class="layer-num">3</div>
+                <div class="layer-title">动态实体</div>
+            </div>
+            <div class="layer-desc">地图上具有时间轴与状态机的移动/战斗实体</div>
+            <table>
+                <tr><th>实体</th><th>状态机</th><th>核心字段</th><th>业务说明</th></tr>
+                <tr>
+                    <td><code>March</code><br><span class="tag">行军</span></td>
+                    <td>
+                        <ul class="compact">
+                            <li>Clustering（集结中）</li>
+                            <li>Clustered（集结到达）</li>
+                            <li>Marching（行军中）</li>
+                            <li>Arrived（行军到达）</li>
+                            <li>Homing（返程中）</li>
+                            <li>Homed（返程到达）</li>
+                        </ul>
+                    </td>
+                    <td><code>MarchId, MarchOwnerId, ClusterId, TargetGrid, MarchPath</code></td>
+                    <td>单支部队的行军逻辑；支持转向（改变目标后重新计算路径）；<code>GetNowGrid()</code> 根据时间插值计算当前所在格子</td>
+                </tr>
+                <tr>
+                    <td><code>Cluster</code><br><span class="tag">集结</span></td>
+                    <td>
+                        <ul class="compact">
+                            <li>Waiting（等待加入）</li>
+                            <li>WaitAllArrived（等待到达）</li>
+                            <li>Marching（集结行军中）</li>
+                            <li>Arrived（集结到达）</li>
+                            <li>Dismissed（解散）</li>
+                        </ul>
+                    </td>
+                    <td><code>ClusterId, ClusterGrid, TargetGrid, WaitBeg/EndTime, Members</code></td>
+                    <td>多支部队汇聚后统一行军；<code>Members</code> 记录参与的 <code>MarchId</code></td>
+                </tr>
+                <tr>
+                    <td><code>Wander</code><br><span class="tag">游荡Boss</span></td>
+                    <td>
+                        <ul class="compact">
+                            <li>Wandering（游荡中）</li>
+                            <li>Attacking（反击中）</li>
+                            <li>Aimed（被集结中）</li>
+                        </ul>
+                    </td>
+                    <td><code>WanderId, BirthGrid, TargetGrid, TargetUid, MovePath, LeftHeroArmys</code></td>
+                    <td>具备 AI 的主动移动实体：游荡 → 发现玩家 → 反击 → 被集结锁定；含过期 Timer 与中断反击 Timer</td>
+                </tr>
+            </table>
+        </div>
+
+        <!-- Layer 4 -->
+        <div class="layer" data-layer="4">
+            <div class="layer-header">
+                <div class="layer-num">4</div>
+                <div class="layer-title">sceneId（地图世界实例标识）</div>
+            </div>
+            <div class="layer-desc">一个进程可托管多个独立地图世界，每个世界拥有独立的 DB 与运行时</div>
+            <ul class="compact">
+                <li><code>sceneId</code> 是地图世界的唯一身份证，所有地图操作均通过 <code>ctx.GetSceneId()</code> 路由到对应的实例。</li>
+                <li>非 SLG 大地图场景（如活动副本）也可复用本框架，通过场景类型减少事件/任务队列资源消耗。</li>
+                <li>起服时通过 <code>SetLoadFunc</code> 注册各场景的数据加载器：<code>LoadObjFunc / LoadMarchFunc / LoadClusterFunc / LoadWanderFunc / LoadBlockFunc / LoadZoneFunc</code>。</li>
+            </ul>
+        </div>
+
+        <!-- Layer 5 -->
+        <div class="layer" data-layer="5">
+            <div class="layer-header">
+                <div class="layer-num">5</div>
+                <div class="layer-title">slgmap（框架层引擎）</div>
+            </div>
+            <div class="layer-desc"><code>slgmap.SlgMap</code> 是底层地图引擎，采用子服务化架构，提供 11 个核心子模块</div>
+            <div class="mermaid">
+            graph TD
+                SlgMap["slgmap.SlgMap<br>地图引擎总控"]
+                SlgMap --> Aoi["aoi.Service<br>视野/AOI管理"]
+                SlgMap --> Cache["cache.Service<br>框架级快照缓存"]
+                SlgMap --> Crontab["crontab.Service<br>定时任务"]
+                SlgMap --> Event["event.Service<br>事件总线"]
+                SlgMap --> Job["job.Service<br>异步任务队列"]
+                SlgMap --> Land["land.Service<br>领地/连通性"]
+                SlgMap --> MarchS["march.Service<br>行军/集结/游荡管理"]
+                SlgMap --> PushS["push.Service<br>消息推送"]
+                SlgMap --> TimerS["timer.Service<br>时间轮定时器"]
+                SlgMap --> UG["user_guild.Service<br>玩家/军团信息缓存"]
+                SlgMap --> WorldS["world.Service<br>地图对象/格子管理"]
+            </div>
+            <table>
+                <tr><th>子模块</th><th>职责</th></tr>
+                <tr><td><code>world</code></td><td>地图对象增删改查、格子预占/释放、Block/Zone 统计、空位搜索（支持强制间隔 <code>forceGap</code>）</td></tr>
+                <tr><td><code>march</code></td><td>行军/集结/游荡的增删改；加载时从外部 <code>LoadMarchFunc / LoadClusterFunc / LoadWanderFunc</code> 注入</td></tr>
+                <tr><td><code>aoi</code></td><td>管理每个玩家的 <strong>静态 Block 列表</strong> + <strong>动态 Block LRU</strong>；维护 <code>block → {uid → viewLevel}</code> 映射</td></tr>
+                <tr><td><code>cache</code></td><td>框架级通用缓存容器，支持按名称注册 <code>VersionCache</code>，提供命中率统计</td></tr>
+                <tr><td><code>push</code></td><td>异步消息推送，支持合并推送（<code>PushMsgMerge</code>）按 <code>(sid, uid, method)</code> 去重，定时 flush</td></tr>
+                <tr><td><code>event</code></td><td>事件总线，多队列缓冲，支持 <code>TriggerWithCtx</code> 触发业务事件（如对象变更、行军状态变化）</td></tr>
+                <tr><td><code>timer</code></td><td>时间轮定时器（默认 100ms 槽位），用于行军超时、游荡过期等</td></tr>
+                <tr><td><code>job</code></td><td>异步任务队列，用于推送、RPC 等耗时操作隔离主逻辑</td></tr>
+                <tr><td><code>crontab</code></td><td>周期性任务（如推送 flush、Watcher 清理）</td></tr>
+                <tr><td><code>land</code></td><td>领地相关计算，如连通性、领地归属</td></tr>
+                <tr><td><code>user_guild</code></td><td>玩家与军团信息的外部缓存，带容量与过期时间</td></tr>
+            </table>
+        </div>
+
+        <!-- Layer 6 -->
+        <div class="layer" data-layer="6">
+            <div class="layer-header">
+                <div class="layer-num">6</div>
+                <div class="layer-title">框架缓存层（快照缓存）</div>
+            </div>
+            <div class="layer-desc"><code>cache.Service</code> 提供的通用数据快照缓存，按视野分级管理 Block 数据</div>
+            <ul class="compact">
+                <li><strong>对象数据缓存</strong>（<code>CacheNameObjData</code>）：以 <code>objGridId</code> 为 key 缓存对象完整数据。</li>
+                <li><strong>行军数据缓存</strong>（<code>CacheNameMarchData</code>）：以 <code>marchId</code> 为 key 缓存行军/集结/游荡的兵线数据。</li>
+                <li><strong>Block 数据缓存</strong>（按视野分级 <code>V1/V2/V3...</code>）：以 <code>blockId</code> 为 key，缓存该 Block 内某视野等级下可见的所有对象/兵线摘要。</li>
+            </ul>
+            <div class="highlight-box">
+                <strong>缓存失效机制：</strong>Commiter 在对象/行军/集结/游荡提交变更后，主动 <code>RemoveKeys</code> 清理受影响的缓存；下次客户端请求时重新组装并写入缓存。缓存带版本号（<code>VersionCache</code>），支持增量比对。
+            </div>
+        </div>
+
+        <!-- Layer 7 -->
+        <div class="layer" data-layer="7">
+            <div class="layer-header">
+                <div class="layer-num">7</div>
+                <div class="layer-title">业务缓存层（MapCache）</div>
+            </div>
+            <div class="layer-desc"><code>mapcache.TMapCacheMgr</code> 维护业务关系映射，加速业务查询</div>
+            <table>
+                <tr><th>缓存类型</th><th>实现</th><th>典型用途</th></tr>
+                <tr>
+                    <td><code>One2ManyCache[O, M]</code></td>
+                    <td>双向映射：<code>One→{Many}</code> + <code>Many→One</code></td>
+                    <td>玩家 UID → 主城 GridId；怪物 Tid → 所有该怪所在的 Grid 列表</td>
+                </tr>
+                <tr>
+                    <td><code>Many2ManyCache</code></td>
+                    <td>双向映射：<code>Parent→{Children}</code> + <code>Child→{Parents}</code></td>
+                    <td>复杂多对多业务关系（如军团与建筑、活动与格子等）</td>
+                </tr>
+            </table>
+            <div class="highlight-box">
+                <strong>预热机制：</strong>起服时 <code>TMapCacheMgr.Start()</code> 遍历 <code>gNewCacheFuncMap</code> 注册的所有缓存类型并初始化；部分缓存会根据预加载的对象数据主动预热。
+            </div>
+        </div>
+
+        <!-- Layer 8 -->
+        <div class="layer" data-layer="8">
+            <div class="layer-header">
+                <div class="layer-num">8</div>
+                <div class="layer-title">tSlgMapInsMgr（总管理器）</div>
+            </div>
+            <div class="layer-desc">一进程管多 <code>scene</code>，每个 <code>scene</code> 挂载 4 大组件</div>
+            <div class="mermaid">
+            graph LR
+                Mgr["tSlgMapInsMgr<br>总管理器"]
+                Mgr --> Map["slgmap.SlgMap<br>地图引擎"]
+                Mgr --> Watch["WatchMgr<br>关注推送管理"]
+                Mgr --> Rev["RevisionMgr<br>增量版本管理"]
+                Mgr --> MapCache["MapCacheMgr<br>业务缓存管理"]
+            </div>
+            <table>
+                <tr><th>组件</th><th>核心实现</th><th>职责</th></tr>
+                <tr>
+                    <td><code>slgmap.SlgMap</code></td>
+                    <td><code>sceneId2slgMapIns</code></td>
+                    <td>底层引擎实例，包含全部 11 个子服务；负责对象/行军/游荡的真实增删改</td>
+                </tr>
+                <tr>
+                    <td><code>WatchMgr</code><br><span class="tag push">TMapWatchManager</span></td>
+                    <td><code>sceneId2slgWatchMgrIns</code></td>
+                    <td>管理 3 类关注数据：<code>SelfData</code>、<code>GuildWarData</code>、<code>UserAlarmData</code>；维护 <code>uid→dataKeys</code> 与 <code>dataKey→uids</code> 双向映射；支持定时清理离线Watcher、异步通知数据版本更新</td>
+                </tr>
+                <tr>
+                    <td><code>RevisionMgr</code><br><span class="tag cache">TBlockRevisionMgr</span></td>
+                    <td><code>sceneId2slgRevisionMgrIns</code></td>
+                    <td>每个 Block 维护一个 <code>TBlockRevision</code>，记录最近最多 <code>500</code> 条、最长 <code>1小时</code> 的增量修订（对象/兵线的增删改）；支持客户端按版本号拉取增量更新</td>
+                </tr>
+                <tr>
+                    <td><code>MapCacheMgr</code><br><span class="tag cache">TMapCacheMgr</span></td>
+                    <td><code>sceneId2slgMapCacheMgrIns</code></td>
+                    <td>统一管理所有业务缓存（One2Many / Many2Many），按 <code>CacheType</code> 索引</td>
+                </tr>
+            </table>
+        </div>
+
+        <!-- Commiter 机制 -->
+        <div class="layer" style="border-color:#c084fc;">
+            <div class="layer-header">
+                <div class="layer-num" style="background:#7e22ce;">C</div>
+                <div class="layer-title">Commiter 机制（数据同步桥梁）</div>
+            </div>
+            <div class="layer-desc">对象/行军/集结/游荡在业务层修改后，通过 Commiter 统一提交到框架层</div>
+            <table>
+                <tr><th>Commiter</th><th>触发时机</th><th>核心动作</th></tr>
+                <tr>
+                    <td><code>ObjectCommiter</code></td>
+                    <td>对象 <code>doAfterUpdate</code></td>
+                    <td>
+                        <ul class="compact">
+                            <li>判断 Create / Destroy / Update，调用 <code>slgmap.World().Add/Del/UpdateObj</code></li>
+                            <li>清理 <code>CacheNameObjData</code> 及对应视野等级 Block 缓存</li>
+                            <li>向 <code>RevisionMgr</code> 添加 Block 修订记录</li>
+                            <li>通知 <code>WatchMgr</code> 更新数据版本，触发 SelfData / GuildWarData 推送</li>
+                            <li>触发 <code>EUserEventObjectDataChanged</code> 事件</li>
+                        </ul>
+                    </td>
+                </tr>
+                <tr>
+                    <td><code>MarchCommiter</code></td>
+                    <td>行军 <code>doAfterUpdate</code></td>
+                    <td>
+                        <ul class="compact">
+                            <li>调用 <code>slgmap.March().Add/Del/UpdateMarch</code></li>
+                            <li>清理行军缓存与受影响 Block 的兵线缓存</li>
+                            <li>按 <code>before/after</code> Block 集合计算增删改修订记录</li>
+                            <li>通知行军发起者、目标内部玩家、GuildWar 关注者</li>
+                        </ul>
+                    </td>
+                </tr>
+                <tr>
+                    <td><code>ClusterCommiter</code></td>
+                    <td>集结 <code>doAfterUpdate</code></td>
+                    <td>类似 MarchCommiter，处理集结整体状态与成员变化</td>
+                </tr>
+                <tr>
+                    <td><code>WanderCommiter</code></td>
+                    <td>游荡 <code>doAfterUpdate</code></td>
+                    <td>同步游荡状态到 <code>slgmap.March()</code>（游荡在引擎层也作为特殊行军处理），清理缓存并触发修订与推送</td>
+                </tr>
+            </table>
+            <div class="highlight-box">
+                <strong>设计要点：</strong>Commiter 在 <code>Commit()</code> 时对比 <code>initWorldObj</code> 与当前对象状态，仅在实际变化时执行下游同步；所有推送操作通过 <code>ctx.AddSuccDeferCall</code> 延迟到事务成功后执行，保证一致性。
+            </div>
+        </div>
+
+        <!-- 核心关系总结 -->
+        <div class="relation-summary">
+            <h3>核心关系链</h3>
+            <p style="font-size:14px;line-height:1.8;">
+                <code>sceneId</code> 是地图世界的身份证 → <code>slgmap.SlgMap</code> 是底层引擎（含 world/march/aoi/cache/push/event/timer/job/crontab/land/user_guild 11 个子服务） → <code>tSlgMapInsMgr</code> 是总控（一进程管理多 scene，每个 scene 挂载 SlgMap + WatchMgr + RevisionMgr + MapCacheMgr 四个组件） → <code>Commiter</code> 是业务层与框架层之间的同步桥梁（负责对象/行军/集结/游荡修改后的统一提交、缓存失效、版本更新、事件触发与客户端推送）。
+            </p>
+            <p style="font-size:14px;line-height:1.8;">
+                缓存分两层：<strong>框架层缓存</strong>（<code>cache.Service</code>）保存数据快照（对象数据 / 行军数据 / Block 分级视野数据），按 key 失效；<strong>业务层缓存</strong>（<code>mapcache</code>）保存 One2Many / Many2Many 关系映射（如 UID→主城、Tid→怪物格子列表），起服预热。
+            </p>
+        </div>
+    </div>
+</body>
+</html>

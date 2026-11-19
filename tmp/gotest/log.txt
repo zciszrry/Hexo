@@ -1,0 +1,143 @@
+方法的参数使用小写字母'a'开头，全局变量使用小写的字母‘g’开头
+
+如果是结构体则用大写的‘T’开头， 如果是函数则以大写的‘F’开头，如果是接口则用大写的‘I’开头
+
+常量或静态只读使用全大写，每个单词之间用下划线
+
+文件夹的命名：考虑到Windows和Linux对大小写敏感的不同，必须全部采用小写的方式
+
+ 
+
+ 
+
+_def.go  常量
+
+.go    定义接口
+
+
+
+  IInSimOrderModule 
+
+​       -GetAttr（_in.go）
+
+getAttr(_logic.go)  返回TAttr（一个map）（为空）和TTime(带有过期时间，收集未过期的属性)
+
+
+
+  IInSimOrderData   
+
+​       -FindData（_in.go）
+
+findData(_obj.go)：创建数据库结构体，设置id,加载数据，关联业务对象obj，返回接口
+
+
+
+  IRpcSimOrderModule
+
+​       -GetInfo（_rpc.go）
+
+​          getInfo(_rpc.go)
+
+RefreshAdventure: 获取配置和当前冒险列表; 非强制刷新且已达最大数量则直接返回; /遍历现有冒险任务,移除完成任务；确定book；随机生成新冒险
+
+​       
+
+​	DoOrder
+
+doOrder:获取Obj;OpenResolution()；资源扣除，TryDoCost();获得资源；属性奖励
+
+
+
+DoAdventure
+
+   doAdvebture:
+
+检查curAdventureNum和maxNum;
+
+检查len(arrPeople)和HadPeople(aArrPeople),数量是否足够和城堡里是否存在；
+
+CostInfo->DoCost，玩家扣除;
+
+获得配置总数，根据每一条配置创建arrType2EventList,映射:事件类型——事件id列表；
+
+exceptId[]：(人)Id——bool
+
+deployPeopleFunc（aArrId[],aType,aDeployPeople[]）:
+
+​	根据exceptId和aArrPeople初始化arrPeople;
+
+​	遍历aArrId
+
+​	从arrPeople随机选出一个
+
+​	构建arrPeopleEvent[][]：ndex->{curId(人)，Id(事件)，aType（事件）；
+
+​	标记Excape和Death事件的人为except;
+
+​	curId从arrPeople移除（不重复）
+
+getSampleEvent分配+deploy，填充arrPeopleEvent
+
+obj.DoAdventure(aAdventureId,,startTime,,endTime,aArrPeople,arrPeopleEvent)
+
+aRsp.AddArrEvent
+
+
+
+
+
+​       -GetBookREward 
+
+  ISimOrderData
+
+​       -GetId
+
+​       -GetKey
+
+ 
+
+ 
+
+getSimOrderObj 根据auid在acontext中，返回TSimOrderObj : 
+
+->tables.TSimOrder->pb.TSimOrder->                               
+
+->majorserver.TContext
+
+ 
+
+ 
+
+  GetConfSimOrderByKey 返回ITConfSimOrder
+
+​    
+
+ 
+
+ 
+
+ 
+
+TSimOrder的Resolution是什么？OpenResolution?
+
+Game_modifier？
+
+DoOrder和DoAdventure？
+
+为什么不把deployPeopleFunc封装出去？
+
+ 
+
+ 
+
+ getSampleEvent(aContext，aArrEventNumWeight[][]，aArrEventList[])
+
+aArrEventNumWeight的第二列——>arrWeight——>概率抽样/GetSample(aNum=1)——>arrIndex[0]
+
+   num=aArrEventNumWeight[arrIndex[0]][0]
+
+   遍历num,从arrEventList随机选取，加入arrRetEventId
+
+   如果第一个id不为0，似乎将不会再进入两个if逻辑
+
+   

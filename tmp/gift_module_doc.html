@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>majorserver - Gift 礼物系统详解</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.7;
+            color: #333;
+            background: #fafafa;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            background: #fff;
+            padding: 48px 56px;
+            border: 1px solid #e0e0e0;
+        }
+        h1 {
+            font-size: 28px;
+            font-weight: 600;
+            border-bottom: 2px solid #333;
+            padding-bottom: 12px;
+            margin-bottom: 32px;
+        }
+        h2 {
+            font-size: 20px;
+            font-weight: 600;
+            margin-top: 40px;
+            margin-bottom: 16px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #ddd;
+        }
+        h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-top: 24px;
+            margin-bottom: 10px;
+        }
+        p { margin-bottom: 12px; }
+        code {
+            font-family: "Fira Code", "JetBrains Mono", Consolas, monospace;
+            font-size: 13px;
+            background: #f4f4f4;
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+        pre {
+            background: #f7f7f7;
+            border: 1px solid #e0e0e0;
+            padding: 16px 20px;
+            margin: 12px 0 20px;
+            overflow-x: auto;
+            font-size: 13px;
+            line-height: 1.5;
+            font-family: "Fira Code", "JetBrains Mono", Consolas, monospace;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0 20px;
+            font-size: 14px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px 12px;
+            text-align: left;
+        }
+        th {
+            background: #f5f5f5;
+            font-weight: 600;
+        }
+        tr:nth-child(even) { background: #fafafa; }
+        .note {
+            background: #f9f9f9;
+            border-left: 3px solid #999;
+            padding: 12px 16px;
+            margin: 16px 0;
+            font-size: 14px;
+        }
+        .file-path {
+            color: #555;
+            font-size: 13px;
+            font-style: italic;
+        }
+        ul { padding-left: 24px; margin-bottom: 12px; }
+        li { margin-bottom: 6px; }
+        .diagram {
+            background: #fdfdfd;
+            border: 1px solid #e0e0e0;
+            padding: 20px;
+            margin: 16px 0;
+            text-align: center;
+            font-family: monospace;
+            font-size: 13px;
+            line-height: 1.8;
+            white-space: pre;
+        }
+        .section-intro {
+            color: #555;
+            font-size: 15px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+
+<h1>majorserver / module / gift &mdash; 礼物系统详解</h1>
+
+<p class="section-intro">
+    Gift 模块是 majorserver 中的<strong>社交礼物系统</strong>（非礼包/商城系统），负责玩家之间赠送礼物、礼物展台展示、赠礼记录管理、礼物经验等级等功能。该系统增强了游戏的社交互动体验。
+</p>
+
+<div class="note">
+<strong>重要区分：</strong>此模块是"礼物系统"（玩家间社交赠礼），而非"礼包系统"（商城道具包）。礼包系统位于 <code>module/gift</code> 同级的其他模块中。
+</div>
+
+<!-- ==================== 目录结构 ==================== -->
+<h2>1. 目录结构</h2>
+
+<pre>majorserver/module/gift/
+├── igift.go              # 接口定义层（模块接口、数据接口、RPC接口）
+├── gift_def.go           # 常量定义 &amp; 辅助结构体
+└── giftimpl/             # 具体实现
+    ├── gift_in.go        # 模块内部调用实现（TInGiftModule）
+    ├── gift_logic.go     # 核心业务逻辑（赠礼、领奖、展台等）
+    ├── gift_rpc.go       # RPC 请求入口（TRpcGiftModule）
+    ├── gift_obj.go       # 数据对象（TGiftObj）
+    ├── gift_task.go      # 异步任务（延迟更新累计最大赠送者）
+    ├── gift_util.go      # 工具函数（数据转换、排序、配置读取）
+    ├── gift_obj_auto.go  # 自动生成的对象初始化代码
+    ├── gift_pool_auto.go # 对象池自动代码
+    ├── gift_inpool_auto.go  # 池相关自动代码
+    └── datainner_auto.go # 内部数据自动代码
+</pre>
+
+<!-- ==================== 架构总览 ==================== -->
+<h2>2. 架构总览</h2>
+
+<div class="diagram">
+┌──────────────────────────────────────────────────────────┐
+│                     Client (客户端)                        │
+└───────────────────────────┬──────────────────────────────┘
+                            │ RPC 请求
+                            ▼
+┌──────────────────────────────────────────────────────────┐
+│              TRpcGiftModule (gift_rpc.go)                  │
+│  GetInfo / ClaimLvReward / ModifyShowcase / SendGift ...   │
+└───────────────────────────┬──────────────────────────────┘
+                            │
+          ┌─────────────────┼─────────────────┐
+          ▼                 ▼                 ▼
+┌────────────────┐ ┌────────────────┐ ┌────────────────────┐
+│  事件监听层     │ │  数据访问层     │ │  异步任务层         │
+│ (gift_logic)   │ │  (gift_in +    │ │ (gift_task)        │
+│ EventAddResource│ │  gift_obj)     │ │ UpdateMaxFromUid   │
+└───────┬────────┘ └───────┬────────┘ └─────────┬──────────┘
+        │                  │                     │
+        └──────────────────┼─────────────────────┘
+                           ▼
+┌──────────────────────────────────────────────────────────┐
+│                  DB 持久层                                 │
+│  TGift (玩家礼物主表)                                      │
+│  TServerGiftRecord (服务器级赠礼记录)                       │
+└──────────────────────────────────────────────────────────┘
+</div>
+
+<!-- ==================== 核心概念 ==================== -->
+<h2>3. 核心概念</h2>
+
+<h3>3.1 礼物（Gift Item）</h3>
+<p>
+    礼物是可以在玩家之间赠送的虚拟物品。每种礼物有唯一的 <code>GiftTid</code>（配置表ID），具有类型（免费/付费）、批次数量、经验值、花费等属性。
+</p>
+
+<h3>3.2 礼物经验与等级</h3>
+<p>
+    玩家每次赠送礼物会获得经验值（<code>ERGiftExp</code> 资源类型）。经验累计到一定值后提升礼物等级，每个等级可以领取对应的等级奖励。
+</p>
+
+<h3>3.3 展台系统（Showcase）</h3>
+<p>
+    每个玩家拥有一个"礼物展台"，可以将收到的礼物放入展台栏位进行展示。其他玩家访问时可以看到展台上的礼物及其数量、赠送者信息等。展台栏位数量由配置 <code>ShowMax</code> 控制。
+</p>
+
+<h3>3.4 赠礼记录（Record）</h3>
+<p>
+    每次赠礼都会产生一条记录，包含发送者UID、礼物类型、数量、时间、自定义留言、是否匿名等信息。记录有最大保存数量和有效期限制。
+</p>
+
+<h3>3.5 累计最大赠送者（MaxFromUid）</h3>
+<p>
+    系统追踪每种礼物中"累计赠送数量最多"的玩家。该计算通过异步延迟任务完成，避免阻塞主流程。
+</p>
+
+<!-- ==================== 接口定义 ==================== -->
+<h2>4. 接口定义层</h2>
+
+<p class="file-path">文件：majorserver/module/gift/igift.go</p>
+
+<h3>4.1 IInGiftData &mdash; 数据查找接口</h3>
+<pre>type IInGiftData interface {
+    FindGiftData(aUid uint64) IGiftData
+}</pre>
+
+<h3>4.2 IInGiftModule &mdash; 模块内部调用接口</h3>
+<pre>type IInGiftModule interface {
+    // 获取礼物系统经验值和展台序列化数据（供其他模块展示用）
+    GetGiftShowData(aUid uint64) (uint64, []byte)
+    // 根据经验值计算当前等级
+    CalcExpLv(aExpVal int64) (int64, int)
+}</pre>
+
+<h3>4.3 IRpcGiftModule &mdash; RPC 接口</h3>
+<pre>type IRpcGiftModule interface {
+    GetInfo(aReq, aRsp)          // 获取礼物模块全量数据
+    ClaimLvReward(aReq, aRsp)    // 领取等级奖励
+    ModifyShowcase(aReq, aRsp)   // 修改展台布局
+    GetGiftShow(aReq, aRsp)      // 查看指定礼物展示信息
+    ModifyGiftShow(aReq, aRsp)   // 修改礼物展示设定
+    GetRecordList(aReq, aRsp)    // 拉取赠礼记录列表
+    SendGift(aReq, aRsp)         // 赠送礼物
+}</pre>
+
+<h3>4.4 IGiftData &mdash; 数据对象接口</h3>
+<pre>type IGiftData interface {
+    GetId() uint64
+    GetKey() string
+    ILogicGetNum(aTid int) uint64    // 获取指定礼物拥有数量
+    ILogicSubNum(aTid int, sNum uint64) // 减少礼物数量
+    ILogicAddNum(aTid int, aNum uint64) // 增加礼物数量
+    ILogicPush()
+    GetMaxValidRecordId() uint32     // 最大有效记录ID
+    GmFixShowcase()                  // GM修复展台数据
+}</pre>
+
+<!-- ==================== 常量定义 ==================== -->
+<h2>5. 常量与配置</h2>
+
+<p class="file-path">文件：majorserver/module/gift/gift_def.go</p>
+
+<table>
+    <tr><th>常量</th><th>值</th><th>说明</th></tr>
+    <tr><td><code>ShowcaseIdxHide</code></td><td>-1</td><td>礼物默认展示位，-1 表示不展示</td></tr>
+    <tr><td><code>CustomConfig_ShowcaseLength</code></td><td>"ShowMax"</td><td>展台栏位最大数量（配置表键名）</td></tr>
+    <tr><td><code>CustomConfig_RecordMaxNum</code></td><td>"RecordMaxNum"</td><td>单种礼物最多保存记录条数</td></tr>
+    <tr><td><code>CustomConfig_RecordMaxTime</code></td><td>"RecordMaxTime"</td><td>赠送记录最长保存时间（秒）</td></tr>
+    <tr><td><code>ArrFromAccMaxLengthNotCache</code></td><td>10</td><td>累计赠送排名前N名的最大值</td></tr>
+    <tr><td><code>ArrFromAccTaskDelaySecs</code></td><td>5</td><td>更新最大赠送者的异步任务延迟秒数</td></tr>
+</table>
+
+<h3>辅助结构体</h3>
+<pre>// 用于排序累计赠送最多玩家
+type TSortMaxFromUidParams struct {
+    FromUid     uint64 // 来源玩家UID
+    AccNum      uint64 // 累计赠送个数
+    SendTime    uint64 // 最近赠送时间
+    OnlyUnnamed bool   // 是否仅匿名赠送
+}
+
+// 异步任务参数
+type TTaskUpdateMaxFromUidParams struct {
+    RecvUid uint64   // 接收者UID
+    GiftTid uint32   // 礼物配置ID
+}</pre>
+
+<!-- ==================== 数据模型 ==================== -->
+<h2>6. 数据模型</h2>
+
+<h3>6.1 TGift 主表结构</h3>
+<table>
+    <tr><th>字段</th><th>类型</th><th>说明</th></tr>
+    <tr><td>Uid</td><td>uint64</td><td>玩家UID（主键）</td></tr>
+    <tr><td>GiftExp</td><td>uint64</td><td>礼物系统经验值</td></tr>
+    <tr><td>RecordAutoId</td><td>uint32</td><td>记录自增ID</td></tr>
+    <tr><td>ArrLvClaimed</td><td>[]uint32</td><td>已领取的等级奖励列表</td></tr>
+    <tr><td>ArrRecord</td><td>TGiftRecordArray</td><td>赠礼记录列表</td></tr>
+    <tr><td>ArrGift</td><td>TGiftDataArray</td><td>各种礼物的详细数据</td></tr>
+    <tr><td>Showcase</td><td>[]byte</td><td>展台数据（protobuf序列化）</td></tr>
+</table>
+
+<h3>6.2 TGiftData 单种礼物数据</h3>
+<table>
+    <tr><th>字段</th><th>类型</th><th>说明</th></tr>
+    <tr><td>GiftTid</td><td>uint32</td><td>礼物配置ID</td></tr>
+    <tr><td>OwnNum</td><td>uint64</td><td>当前拥有数量</td></tr>
+    <tr><td>RecvNum</td><td>uint64</td><td>累计收到数量</td></tr>
+    <tr><td>ShowIdx</td><td>int32</td><td>展台位置（-1=不展示）</td></tr>
+    <tr><td>ArrShowNum</td><td>[]uint32</td><td>已解锁的展示批次数量</td></tr>
+    <tr><td>CurShowNum</td><td>uint32</td><td>当前展示的批次数量</td></tr>
+    <tr><td>MaxFromUid</td><td>uint64</td><td>累计赠送最多的玩家UID</td></tr>
+    <tr><td>ArrFromAcc</td><td>TGiftFromAccArray</td><td>累计赠送排名数据</td></tr>
+    <tr><td>IsShowMax</td><td>int32</td><td>是否展示最大赠送者（1=是）</td></tr>
+    <tr><td>IsShowMsg</td><td>int32</td><td>是否展示自定义留言（1=是）</td></tr>
+    <tr><td>MsgRecordId</td><td>uint32</td><td>当前展示的留言记录ID</td></tr>
+    <tr><td>LatestRecordId</td><td>uint32</td><td>最新收到的记录ID</td></tr>
+    <tr><td>UpdateMaxTaskId</td><td>string</td><td>更新最大赠送者的异步任务ID</td></tr>
+</table>
+
+<h3>6.3 TGiftRecord 赠礼记录</h3>
+<table>
+    <tr><th>字段</th><th>类型</th><th>说明</th></tr>
+    <tr><td>RecordId</td><td>uint32</td><td>记录唯一ID</td></tr>
+    <tr><td>SenderUid</td><td>uint64</td><td>赠送者UID</td></tr>
+    <tr><td>GiftTid</td><td>uint32</td><td>礼物配置ID</td></tr>
+    <tr><td>Num</td><td>uint64</td><td>赠送数量</td></tr>
+    <tr><td>SendTime</td><td>uint64</td><td>赠送时间戳</td></tr>
+    <tr><td>IsUnnamed</td><td>int32</td><td>是否匿名（1=匿名）</td></tr>
+    <tr><td>CustomMsg</td><td>string</td><td>自定义留言</td></tr>
+</table>
+
+<h3>6.4 TServerGiftRecord 服务器级记录</h3>
+<p>
+    独立于玩家数据的服务器级表，用于异步任务统计累计赠送排名。按 <code>(RecvUid, RecordId)</code> 为主键存储。
+</p>
+
+<!-- ==================== 核心流程 ==================== -->
+<h2>7. 核心流程详解</h2>
+
+<h3>7.1 赠送礼物（SendGift）</h3>
+
+<div class="diagram">
+客户端 SendGift 请求
+        │
+        ▼
+┌─────────────────────────────────────────┐
+│ 1. 前置校验                              │
+│    - 目标UID非空且非自己                   │
+│    - 锁定双方数据 LockUserData(uid, tgtUid)│
+│    - 验证批次数量合法性(batchIdx)           │
+│    - 验证目标玩家存在                      │
+└───────────────────────────┬─────────────┘
+                            ▼
+┌─────────────────────────────────────────┐
+│ 2. 礼物扣减/购买                         │
+│    - 检查发送者是否拥有足够礼物             │
+│    - 不足时：付费型礼物触发自动购买         │
+│      (扣除货币, 增加OwnNum)               │
+│    - 扣减发送者 OwnNum                    │
+└───────────────────────────┬─────────────┘
+                            ▼
+┌─────────────────────────────────────────┐
+│ 3. 敏感词过滤                            │
+│    - 对自定义留言做 ReplaceMaskWord        │
+└───────────────────────────┬─────────────┘
+                            ▼
+┌─────────────────────────────────────────┐
+│ 4. 接收者数据更新                         │
+│    - addRecord: 添加赠礼记录              │
+│    - addServerRecvGiftRecord: 写服务器表  │
+│    - RecvNum += Num                      │
+│    - 解锁新的 ShowNum 批次                │
+│    - 延迟任务更新 MaxFromUid              │
+│    - 首条留言时设置 MsgRecordId            │
+│    - 展台中的礼物更新 ShowcaseBytes        │
+└───────────────────────────┬─────────────┘
+                            ▼
+┌─────────────────────────────────────────┐
+│ 5. 发送者获得经验                         │
+│    - DoReward(ERGiftExp, conf.Exp * Num) │
+└───────────────────────────┬─────────────┘
+                            ▼
+┌─────────────────────────────────────────┐
+│ 6. 发送聊天消息                           │
+│    - 世界频道(批次档位触发) 或 私聊         │
+│    - 匿名赠礼必须走世界频道               │
+└───────────────────────────┬─────────────┘
+                            ▼
+┌─────────────────────────────────────────┐
+│ 7. 统计日志                              │
+│    - StatLog: GiftSendGift / GiftRecvGift│
+│    - (购买时额外: GiftBuyGift)            │
+└─────────────────────────────────────────┘
+</div>
+
+<h3>7.2 礼物经验同步</h3>
+<pre>// 事件监听
+func init() {
+    logicfw.AddEventListener(event.EventAddResource, onEventAddResource)
+}
+
+// 当资源增加事件触发时，若资源类型为 ERGiftExp，同步到 GiftObj
+func onEventAddResource(iContext, aEvent) {
+    if tid != ERGiftExp { return }
+    giftObj.setGiftExp(userData.ILogicGetNum(ERGiftExp))
+}</pre>
+<p>经验值存储在 User 模块的资源系统中（<code>ERGiftExp</code>），通过事件监听同步到 Gift 模块的本地缓存。</p>
+
+<h3>7.3 等级计算（CalcExpLv）</h3>
+<pre>func CalcExpLv(aExpVal int64) (int64, int) {
+    // 从最高等级往下遍历配置
+    // 找到第一个 conf.Exp &lt;= aExpVal 的等级
+    // 返回 (经验值, 等级ID)
+}</pre>
+<p>等级配置表 <code>GiftLevel</code> 按经验值升序排列，函数从最高等级向下查找，返回当前匹配的等级。</p>
+
+<h3>7.4 领取等级奖励（ClaimLvReward）</h3>
+<ul>
+    <li>校验请求的等级是否有对应奖励配置</li>
+    <li>校验该等级奖励是否已领取过（防重复）</li>
+    <li>发放奖励（<code>DoReward</code>）</li>
+    <li>记录已领取状态（<code>ArrLvClaimed</code>）</li>
+</ul>
+
+<!-- ==================== 展台系统 ==================== -->
+<h2>8. 展台系统</h2>
+
+<h3>8.1 数据结构</h3>
+<p>
+    展台数据以 protobuf (<code>TGiftShowcaseInfo</code>) 序列化后存储为字节数组。每个展示项包含：礼物TID、累计收到数量、当前展示批次数量、展示位索引。
+</p>
+
+<h3>8.2 修改展台（ModifyShowcase）</h3>
+<ul>
+    <li>客户端传入礼物TID数组，数组索引即为展台位置</li>
+    <li>校验数组长度不超过 <code>ShowMax</code></li>
+    <li>校验不存在重复TID（同一礼物不能占多个位置）</li>
+    <li>更新各礼物的 <code>ShowIdx</code> 字段</li>
+    <li>重新序列化展台字节数据</li>
+</ul>
+
+<h3>8.3 修改礼物展示设定（ModifyGiftShow）</h3>
+<p>每个礼物的展示可以独立配置：</p>
+<table>
+    <tr><th>设定项</th><th>说明</th></tr>
+    <tr><td>IsShowMax</td><td>是否对外展示"累计赠送最多的玩家"</td></tr>
+    <tr><td>IsShowMsg</td><td>是否对外展示"自定义留言"</td></tr>
+    <tr><td>MsgRecordId</td><td>选择哪条赠礼记录的留言作为展示</td></tr>
+    <tr><td>ShowNum</td><td>展示的批次数量（需已解锁）</td></tr>
+</table>
+
+<h3>8.4 展台数据更新时机</h3>
+<p>以下操作会触发 <code>updateShowcaseBytes()</code>：</p>
+<ul>
+    <li>修改展台布局（ModifyShowcase）</li>
+    <li>修改礼物展示设定（ModifyGiftShow，仅当礼物在展台中时）</li>
+    <li>收到新礼物且该礼物已在展台中</li>
+    <li>对象初始化时展台数据为空</li>
+</ul>
+
+<!-- ==================== 记录管理 ==================== -->
+<h2>9. 赠礼记录管理</h2>
+
+<h3>9.1 记录存储</h3>
+<p>记录存储在两个层面：</p>
+<ul>
+    <li><strong>玩家级：</strong><code>TGift.ArrRecord</code> &mdash; 存储在玩家数据中，用于客户端展示</li>
+    <li><strong>服务器级：</strong><code>TServerGiftRecord</code> &mdash; 独立数据库表，用于异步任务统计</li>
+</ul>
+
+<h3>9.2 记录过期清理（AutoRefresh）</h3>
+<p>在对象加载时自动执行清理：</p>
+<ul>
+    <li>超过 <code>RecordMaxTime</code>（秒）的记录被删除</li>
+    <li>同种礼物超过 <code>RecordMaxNum</code> 条的旧记录被删除</li>
+    <li>被礼物展示引用的记录（<code>MsgRecordId</code>）不会被清理</li>
+</ul>
+
+<h3>9.3 拉取记录（GetRecordList）</h3>
+<p>
+    支持按礼物类型筛选（<code>GiftTid</code>），支持游标分页（<code>MinRecordId</code> + <code>Limit</code>），记录按时间倒序返回。匿名赠送的记录不会返回发送者UID。
+</p>
+
+<!-- ==================== 累计赠送排名 ==================== -->
+<h2>10. 累计赠送排名（异步任务）</h2>
+
+<p class="file-path">文件：giftimpl/gift_task.go</p>
+
+<h3>10.1 触发时机</h3>
+<p>
+    每次收到礼物后调用 <code>resetTaskUpdateMaxFromUid</code>，注册一个延迟 5 秒的异步任务。短时间内多次赠送只会在最后一次 5 秒后统一计算，避免频繁查库。
+</p>
+
+<h3>10.2 任务执行流程（onTaskUpdateMaxFromUid）</h3>
+<div class="diagram">
+1. 获取玩家当前最大有效记录ID（用于过滤无效数据）
+               │
+               ▼
+2. 分页查询 TServerGiftRecord 表
+   WHERE RecvUid=? AND GiftTid=?
+   ORDER BY RecordId ASC
+               │
+               ▼
+3. 按 SenderUid 聚合累计赠送数量
+   构建 uid2SortParams map
+               │
+               ▼
+4. 排序：AccNum 降序, SendTime 升序（相同数量早送者优先）
+               │
+               ▼
+5. 加锁后更新接收者数据：
+   - 设置 MaxFromUid（排名第1）
+   - 清空并重建 ArrFromAcc（前10名）
+</div>
+
+<h3>10.3 排序规则</h3>
+<pre>sort.Slice(aArr, func(i, j int) bool {
+    if aArr[i].AccNum != aArr[j].AccNum {
+        return aArr[i].AccNum > aArr[j].AccNum  // 赠送多的在前
+    }
+    return aArr[i].SendTime < aArr[j].SendTime  // 同数量时早送的在前
+})</pre>
+
+<!-- ==================== RPC接口 ==================== -->
+<h2>11. RPC 接口详解</h2>
+
+<table>
+    <tr><th>接口</th><th>请求</th><th>响应</th><th>加锁</th><th>功能</th></tr>
+    <tr>
+        <td>GetInfo</td>
+        <td>TEmptyReq</td>
+        <td>TGiftGetInfoRsp</td>
+        <td>否</td>
+        <td>返回全部礼物数据 + 已领等级列表 + 展台信息</td>
+    </tr>
+    <tr>
+        <td>ClaimLvReward</td>
+        <td>TGiftClaimLvRewardReq</td>
+        <td>TGiftClaimLvRewardRsp</td>
+        <td>是(自己)</td>
+        <td>领取指定等级奖励</td>
+    </tr>
+    <tr>
+        <td>ModifyShowcase</td>
+        <td>TGiftModifyShowcaseReq</td>
+        <td>TEmptyRsp</td>
+        <td>是(自己)</td>
+        <td>修改展台上展示的礼物及位置</td>
+    </tr>
+    <tr>
+        <td>GetGiftShow</td>
+        <td>TGiftGetGiftShowReq</td>
+        <td>TGiftGetGiftShowRsp</td>
+        <td>否</td>
+        <td>查看某玩家某个礼物的展示详情</td>
+    </tr>
+    <tr>
+        <td>ModifyGiftShow</td>
+        <td>TGiftModifyGiftShowReq</td>
+        <td>TGiftGetGiftShowRsp</td>
+        <td>是(自己)</td>
+        <td>修改礼物展示设定（留言、最大者、批次）</td>
+    </tr>
+    <tr>
+        <td>GetRecordList</td>
+        <td>TGiftGetRecordListReq</td>
+        <td>TGiftGetRecordListRsp</td>
+        <td>否</td>
+        <td>分页拉取赠礼记录（支持按礼物筛选）</td>
+    </tr>
+    <tr>
+        <td>SendGift</td>
+        <td>TGiftSendGiftReq</td>
+        <td>TGiftSendGiftRsp</td>
+        <td>是(双方)</td>
+        <td>赠送礼物，核心接口</td>
+    </tr>
+</table>
+
+<!-- ==================== 推送通知 ==================== -->
+<h2>12. 客户端推送通知</h2>
+
+<table>
+    <tr><th>消息名称</th><th>触发时机</th><th>内容</th></tr>
+    <tr>
+        <td><code>push.UpdateGiftDataNotify</code></td>
+        <td>礼物数据变化（收到礼物、数量变化等）</td>
+        <td>变化的礼物数据 + 新增记录</td>
+    </tr>
+</table>
+
+<p>推送机制通过 <code>doAfterUpdate</code> 实现：</p>
+<ul>
+    <li><code>needPushGiftTid</code>：标记哪些礼物数据需要推送</li>
+    <li><code>needPushRecordIdToSender</code>：标记哪些新记录需要推送给接收者</li>
+    <li>在数据对象更新后统一执行推送，避免多次推送</li>
+</ul>
+
+<!-- ==================== 聊天集成 ==================== -->
+<h2>13. 聊天系统集成</h2>
+
+<p>赠礼完成后会自动发送聊天消息：</p>
+
+<table>
+    <tr><th>场景</th><th>频道</th><th>消息类型</th><th>内容</th></tr>
+    <tr>
+        <td>批次档位达到世界展示条件</td>
+        <td>世界频道</td>
+        <td><code>GiftSend_World</code></td>
+        <td>礼物TID、数量、留言、是否匿名、双方信息</td>
+    </tr>
+    <tr>
+        <td>普通赠礼</td>
+        <td>私聊</td>
+        <td><code>GiftSend_Person</code></td>
+        <td>礼物TID、数量、留言</td>
+    </tr>
+</table>
+
+<div class="note">
+<strong>匿名赠礼规则：</strong>仅当消息会发送到世界频道时，才允许选择匿名。私聊赠礼不支持匿名。
+</div>
+
+<!-- ==================== 礼物类型与购买 ==================== -->
+<h2>14. 礼物类型与自动购买</h2>
+
+<h3>14.1 礼物类型</h3>
+<table>
+    <tr><th>类型</th><th>proto枚举</th><th>说明</th></tr>
+    <tr><td>付费型</td><td><code>EGT_Paid</code></td><td>可用货币直接购买，赠送时库存不足会自动扣费购买</td></tr>
+    <tr><td>其他类型</td><td>&mdash;</td><td>通过活动/任务/道具获得，库存不足时无法赠送</td></tr>
+</table>
+
+<h3>14.2 自动购买逻辑</h3>
+<pre>if dbGiftData.GetOwnNum() < aReq.GetNum() {
+    if giftConf.GetType() != EGT_Paid { ThrowFake }  // 非付费型不支持
+    deltaNum := aReq.GetNum() - dbGiftData.GetOwnNum()
+    cost = conf.Cost[0], conf.Cost[1], conf.Cost[2] * deltaNum
+    DoCost(ctx, uid, costInfo)                        // 扣费
+    dbGiftData.SetOwnNum(dbGiftData.GetOwnNum() + deltaNum)
+}</pre>
+
+<h3>14.3 批次数量（BatchNum）</h3>
+<p>
+    礼物配置表支持多档批次数量（如 1/10/99），每档对应不同的世界频道展示规则（<code>IsWorldShow</code>）。客户端发送的 <code>Num</code> 必须大于等于某个批次档位值。
+</p>
+
+<!-- ==================== 数据安全 ==================== -->
+<h2>15. 并发与数据安全</h2>
+
+<table>
+    <tr><th>接口</th><th>加锁策略</th><th>说明</th></tr>
+    <tr><td>SendGift</td><td><code>LockUserData(uid, tgtUid)</code></td><td>同时锁定发送者和接收者，防止并发赠送竞态</td></tr>
+    <tr><td>ClaimLvReward</td><td><code>LockUserData(uid)</code></td><td>防止重复领取</td></tr>
+    <tr><td>ModifyShowcase</td><td><code>LockUserData(uid)</code></td><td>防止并发修改展台</td></tr>
+    <tr><td>ModifyGiftShow</td><td><code>LockUserData(uid)</code></td><td>防止并发修改展示设定</td></tr>
+    <tr><td>GetInfo/GetRecordList</td><td>无锁（只读）</td><td>只读操作无需加锁</td></tr>
+</table>
+
+<p>异步任务在执行数据写入前也会调用 <code>LockUserData(RecvUid)</code> 确保安全。</p>
+
+<!-- ==================== 配置表依赖 ==================== -->
+<h2>16. 配置表依赖</h2>
+
+<table>
+    <tr><th>配置接口</th><th>说明</th></tr>
+    <tr><td><code>GetConfGiftItemByKey</code></td><td>礼物道具配置（类型、花费、经验、批次数量、世界展示规则）</td></tr>
+    <tr><td><code>GetConfGiftLevelByKey/Index/Num</code></td><td>礼物等级配置（等级所需经验、等级奖励）</td></tr>
+    <tr><td><code>GetConfGiftConfigByIndex/Num</code></td><td>礼物系统自定义配置（展台上限、记录上限、记录保存时间）</td></tr>
+</table>
+
+<!-- ==================== 对象生命周期 ==================== -->
+<h2>17. 数据对象生命周期</h2>
+
+<h3>17.1 初始化</h3>
+<pre>func findGiftData(ctx, uid) IGiftData {
+    dbStruct := tables.NewTGift()
+    dbStruct.SetUid(uid)
+    err := ctx.StoreGet(dbStruct)
+    if err == sql.ErrNoRows {
+        // 首次访问，初始化空数据并 Insert
+        dbStruct.SetRecordAutoId(0)
+        dbStruct.InitArrLvClaimed(0)
+        dbStruct.InitArrRecord(0)
+        dbStruct.InitArrGift(0)
+        dbStruct.InitShowcase(0)
+        ctx.StoreInsert(dbStruct)
+    }
+    return NewTGiftObj(ctx, dbStruct)
+}</pre>
+
+<h3>17.2 AutoRefresh（加载后自动刷新）</h3>
+<ul>
+    <li>清理过期记录（按时间和数量）</li>
+    <li>初始化展台序列化数据（若为空）</li>
+    <li>重置变更推送标记</li>
+</ul>
+
+<h3>17.3 doAfterUpdate（更新后推送）</h3>
+<p>
+    对象被修改并提交后，检查 <code>needPushGiftTid</code> 和 <code>needPushRecordIdToSender</code>，若有变化则向客户端发送 <code>push.UpdateGiftDataNotify</code> 推送。
+</p>
+
+<!-- ==================== 关键设计总结 ==================== -->
+<h2>18. 关键设计总结</h2>
+
+<table>
+    <tr><th>设计点</th><th>实现方式</th></tr>
+    <tr>
+        <td>社交赠礼</td>
+        <td>锁定双方数据，原子操作扣减发送者库存、增加接收者记录</td>
+    </tr>
+    <tr>
+        <td>自动购买</td>
+        <td>付费型礼物库存不足时自动扣费补齐，无缝体验</td>
+    </tr>
+    <tr>
+        <td>展台展示</td>
+        <td>protobuf序列化存储，供其他模块（如个人主页）高效读取</td>
+    </tr>
+    <tr>
+        <td>匿名赠送</td>
+        <td>记录层面存储真实UID，展示层面按 IsUnnamed 过滤</td>
+    </tr>
+    <tr>
+        <td>累计排名异步化</td>
+        <td>通过延迟任务（5秒后）查询服务器级记录表统一计算，避免阻塞主流程</td>
+    </tr>
+    <tr>
+        <td>记录过期清理</td>
+        <td>对象加载时懒清理，被引用的记录豁免</td>
+    </tr>
+    <tr>
+        <td>敏感词过滤</td>
+        <td>自定义留言经过 mask_words 过滤后存储</td>
+    </tr>
+    <tr>
+        <td>聊天联动</td>
+        <td>世界频道/私聊消息，按批次档位自动选择频道</td>
+    </tr>
+    <tr>
+        <td>变更推送合并</td>
+        <td>通过 markPush 标记，在 doAfterUpdate 中一次性推送所有变化</td>
+    </tr>
+    <tr>
+        <td>经验同步</td>
+        <td>监听资源增加事件，ERGiftExp 变化时同步到 Gift 模块</td>
+    </tr>
+</table>
+
+<div class="note">
+<strong>扩展说明：</strong>
+<br>1. 礼物的拥有数量（OwnNum）可通过其他系统增加（如活动奖励），Gift 模块实现了 <code>ILogicAddNum/SubNum/GetNum</code> 接口供外部模块调用。
+<br>2. <code>GmFixShowcase()</code> 提供了GM命令修复展台数据的能力，可在数据异常时使用。
+<br>3. 批次展示数量（ShowNum）需要先通过接收对应批次的赠礼来解锁，解锁后才能选择该批次作为展示。
+</div>
+
+<p style="margin-top: 40px; text-align: center; color: #999; font-size: 13px;">
+    文档生成时间：2026-05-21 | 基于 D:\c_server\majorserver\module\gift 源码分析
+</p>
+
+</div>
+</body>
+</html>

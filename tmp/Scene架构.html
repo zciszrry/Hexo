@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scene 架构层级说明</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+            background: #f0f2f5;
+            color: #333;
+            line-height: 1.7;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+            padding: 48px 56px;
+        }
+        h1 {
+            font-size: 28px;
+            text-align: center;
+            margin-bottom: 36px;
+            color: #1a1a2e;
+            border-bottom: 3px solid #4361ee;
+            padding-bottom: 16px;
+        }
+        h2 {
+            font-size: 20px;
+            margin: 32px 0 16px;
+            color: #4361ee;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        h2::before {
+            content: "";
+            display: inline-block;
+            width: 4px;
+            height: 22px;
+            background: #4361ee;
+            border-radius: 2px;
+        }
+        h3 {
+            font-size: 16px;
+            margin: 20px 0 10px;
+            color: #2d3436;
+        }
+
+        /* 架构图 */
+        .arch-diagram {
+            background: #f8f9ff;
+            border: 1px solid #dbe0f5;
+            border-radius: 8px;
+            padding: 28px 24px;
+            margin: 20px 0 32px;
+        }
+        .arch-level {
+            border: 2px solid;
+            border-radius: 10px;
+            padding: 16px 20px;
+            margin-bottom: 0;
+            position: relative;
+        }
+        .arch-level:last-child { margin-bottom: 0; }
+        .arch-level .level-title {
+            font-weight: 700;
+            font-size: 15px;
+            margin-bottom: 6px;
+        }
+        .arch-level .level-desc {
+            font-size: 13px;
+            color: #555;
+        }
+        .arch-level .level-detail {
+            font-size: 12px;
+            color: #888;
+            margin-top: 6px;
+            font-family: "Consolas", "Courier New", monospace;
+            background: rgba(255,255,255,0.6);
+            padding: 6px 10px;
+            border-radius: 4px;
+        }
+        .level-mgr  { border-color: #e63946; background: #fff5f5; }
+        .level-mgr  .level-title { color: #e63946; }
+        .level-svr  { border-color: #4361ee; background: #f0f3ff; margin-left: 32px; margin-right: 32px; }
+        .level-svr  .level-title { color: #4361ee; }
+        .level-ins  { border-color: #2a9d8f; background: #f0faf8; margin-left: 64px; margin-right: 64px; }
+        .level-ins  .level-title { color: #2a9d8f; }
+        .level-map  { border-color: #e9c46a; background: #fffcf0; margin-left: 96px; margin-right: 96px; }
+        .level-map  .level-title { color: #c5912a; }
+        .arch-arrow {
+            text-align: center;
+            font-size: 22px;
+            color: #aaa;
+            margin: 4px 0;
+            line-height: 1;
+        }
+        .arch-label {
+            font-size: 11px;
+            color: #999;
+            text-align: center;
+            margin: 2px 0;
+        }
+
+        /* 表格 */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0 24px;
+            font-size: 14px;
+        }
+        th {
+            background: #4361ee;
+            color: #fff;
+            padding: 10px 16px;
+            text-align: left;
+            font-weight: 600;
+        }
+        td {
+            padding: 10px 16px;
+            border-bottom: 1px solid #eee;
+        }
+        tr:hover td { background: #f8f9ff; }
+
+        /* 代码块 */
+        code, .code-block {
+            font-family: "Consolas", "Courier New", monospace;
+            background: #f4f4f8;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 13px;
+        }
+        .code-block {
+            display: block;
+            padding: 14px 18px;
+            border-radius: 6px;
+            overflow-x: auto;
+            white-space: pre;
+            line-height: 1.6;
+            margin: 12px 0;
+            border-left: 3px solid #4361ee;
+        }
+
+        /* 流程图 */
+        .flow {
+            background: #f8f9ff;
+            border: 1px solid #dbe0f5;
+            border-radius: 8px;
+            padding: 20px 24px;
+            margin: 16px 0;
+            font-family: "Consolas", monospace;
+            font-size: 13px;
+            line-height: 1.8;
+            overflow-x: auto;
+        }
+        .flow .highlight { color: #4361ee; font-weight: 700; }
+        .flow .arrow { color: #e63946; }
+
+        /* 标签 */
+        .tag {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-right: 6px;
+        }
+        .tag-red    { background: #ffe5e5; color: #e63946; }
+        .tag-blue   { background: #e5e9ff; color: #4361ee; }
+        .tag-green  { background: #e5f5f2; color: #2a9d8f; }
+        .tag-yellow { background: #fff8e1; color: #c5912a; }
+
+        .note {
+            background: #fffbe6;
+            border-left: 4px solid #e9c46a;
+            padding: 12px 16px;
+            border-radius: 4px;
+            margin: 16px 0;
+            font-size: 14px;
+        }
+        .note strong { color: #c5912a; }
+
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            font-size: 12px;
+            color: #bbb;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+
+<h1>Scene 架构层级说明</h1>
+
+<!-- ==================== 架构图 ==================== -->
+<h2>架构层级总览</h2>
+
+<div class="arch-diagram">
+    <div class="arch-level level-mgr">
+        <div class="level-title"><span class="tag tag-red">调度层</span> SceneManager（场景管理器）</div>
+        <div class="level-desc">全局唯一，管理所有 SceneServer 的注册和调度</div>
+        <div class="level-detail">etcd: c_server/service/scenemanager#{domain} &nbsp;|&nbsp; 职责: 创建/销毁/迁移 SceneInstance，分配 SceneId → Server</div>
+    </div>
+    <div class="arch-label">▼ &nbsp;管理（RPC调度）</div>
+
+    <div class="arch-level level-svr">
+        <div class="level-title"><span class="tag tag-blue">承载层</span> SceneServer（场景服务器）</div>
+        <div class="level-desc">一个物理进程，可承载多个 SceneInstance。如 slgserver 就是 SceneType=SLG 的 SceneServer</div>
+        <div class="level-detail">
+            etcd: c_server/service/sceneserver#{domain}_{sceneType}_{insName}<br>
+            端口: LanServerPort(接收Mgr管理指令) &nbsp;|&nbsp; LanPort(接收业务RPC请求)<br>
+            MaxInsNum 决定该进程能承载多少个 SceneInstance
+        </div>
+    </div>
+    <div class="arch-label">▼ &nbsp;包含</div>
+
+    <div class="arch-level level-ins">
+        <div class="level-title"><span class="tag tag-green">实例层</span> SceneInstance（场景服务实例）</div>
+        <div class="level-desc">由 SceneId 唯一标识，一个 SceneIns 对应一个独立的数据库(db)</div>
+        <div class="level-detail">
+            SceneId 格式: {domain}_{sceneType}_{uniqueId}，如 "dev_slg_1001"<br>
+            etcd: c_server/service/sceneinstance#{sceneId}<br>
+            每个 SceneIns 有独立的 Context、数据锁、ISceneInsManager
+        </div>
+    </div>
+    <div class="arch-label">▼ &nbsp;内部业务</div>
+
+    <div class="arch-level level-map">
+        <div class="level-title"><span class="tag tag-yellow">有状态层</span> SlgMap（有状态地图服务）</div>
+        <div class="level-desc">外部包 serverfw/slgmap，每个 SceneIns 内部对应一个 SlgMap 实例</div>
+        <div class="level-detail">
+            通过 ctrl 包对接 &nbsp;|&nbsp; 场景之间完全隔离<br>
+            负责: 格子管理、对象占据、行军路径、AOI视野、领地连通性、预占逻辑
+        </div>
+    </div>
+</div>
+
+<!-- ==================== 三级架构表 ==================== -->
+<h2>三级架构详解</h2>
+
+<table>
+    <thead>
+        <tr>
+            <th>层级</th>
+            <th>角色</th>
+            <th>职责</th>
+            <th>示例</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><span class="tag tag-red">SceneManager</span></td>
+            <td>调度中心</td>
+            <td>管理所有 SceneServer 的注册，决定哪个 SceneId 分配给哪个 Server</td>
+            <td>全局唯一</td>
+        </tr>
+        <tr>
+            <td><span class="tag tag-blue">SceneServer</span></td>
+            <td>物理进程</td>
+            <td>一个可执行程序(如 slgserver)，承载多个 SceneIns</td>
+            <td>slgserver 进程</td>
+        </tr>
+        <tr>
+            <td><span class="tag tag-green">SceneInstance</span></td>
+            <td>逻辑实例</td>
+            <td>一个独立的场景(一张地图)，有独立 db、独立数据</td>
+            <td>sceneId="dev_slg_1001"</td>
+        </tr>
+    </tbody>
+</table>
+
+<!-- ==================== SceneId ==================== -->
+<h2>SceneId 的含义</h2>
+
+<p>SceneId 的格式为 <code>{domain}_{sceneType}_{uniqueId}</code>，例如 <code>"dev_slg_1001"</code>：</p>
+<table>
+    <thead>
+        <tr><th>部分</th><th>含义</th><th>示例</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><strong>domain</strong></td><td>环境/域</td><td>dev</td></tr>
+        <tr><td><strong>sceneType</strong></td><td>场景类型</td><td>slg, guildwar, adventure, foodfight …</td></tr>
+        <tr><td><strong>uniqueId</strong></td><td>唯一分组ID（可以是 serverId、届数等）</td><td>1001</td></tr>
+    </tbody>
+</table>
+
+<p>代码中的定义（<code>common/scene/def.go</code>）：</p>
+<div class="code-block">const (
+    SCENE_TYPE_SLG               = "slg"
+    SCENE_TYPE_GUILDWAR          = "guildwar"
+    SCENE_TYPE_ADVENTURE         = "adventure"
+    SCENE_TYPE_CROSSLEVY         = "crosslevy"
+    SCENE_TYPE_AUC               = "auc"
+    SCENE_TYPE_PLUNDER           = "plunder"
+    SCENE_TYPE_FOODFIGHT         = "foodfight"
+    SCENE_TYPE_BLACKNEST         = "blacknest"
+    SCENE_TYPE_GENERAL           = "general"
+    SCENE_TYPE_NEVERWINTERVALLEY = "snv"
+)
+
+func GetSceneId(aDomain, aSceneType, aUniqueId string) string {
+    return fmt.Sprintf("%s_%s_%s", aDomain, aSceneType, aUniqueId)
+}</div>
+
+<!-- ==================== slgserver ==================== -->
+<h2>slgserver 是什么</h2>
+
+<p><code>slgserver</code> 是 <code>SceneType = "slg"</code> 的 <strong>SceneServer 的启动入口</strong>。从 <code>slgserver.go</code> 可以看出启动流程：</p>
+
+<div class="code-block">main()
+  → bin.MainBegin("slgserver")
+  → 构造 TSceneServiceMeta{
+        SceneType:       scene.SCENE_TYPE_SLG,
+        MaxInsNum:       1,
+        FNewSceneInsMgr: slgserver.NewSlgSceneInsMgr,
+        FNewContext:     crossserver.NewIContext,
+    }
+  → bin.StartSceneService(meta)</div>
+
+<p>关键设置：</p>
+<ul style="margin:8px 0 16px 20px;">
+    <li><code>SceneType: scene.SCENE_TYPE_SLG</code> — 声明自己是 SLG 类型的场景服务器</li>
+    <li><code>MaxInsNum: 1</code> — 当前只承载 1 个 SceneInstance</li>
+    <li><code>FNewSceneInsMgr: slgserver.NewSlgSceneInsMgr</code> — 告诉框架如何创建场景实例</li>
+    <li><code>FNewContext</code> — 告诉框架如何创建业务上下文</li>
+</ul>
+
+<!-- ==================== SceneService ==================== -->
+<h2>SceneService 的角色</h2>
+
+<p><code>TSceneService</code> 是框架层（<code>common/scene</code>）的核心，是<strong>每个 SceneServer 进程内的运行时管理者</strong>：</p>
+<ul style="margin:8px 0 16px 20px;">
+    <li>持有 <code>map[string]*TSceneInsInfo</code>，管理该进程内所有 SceneInstance</li>
+    <li>提供 RPC 接口给 SceneManager 调用（启停、迁移场景实例）</li>
+    <li>负责 SceneInstance 的<strong>创建、启动、停止、数据恢复</strong></li>
+    <li>每个 SceneIns 内部创建独立的 DB、ID 生成器、Kafka Topic</li>
+</ul>
+
+<div class="note">
+    <strong>关键方法：</strong>
+    <code>Init()</code> → <code>Start()</code>(含recoverSceneIns) → <code>afterRecoverSceneIns()</code> → <code>Stop()</code>
+</div>
+
+<!-- ==================== SlgMap ==================== -->
+<h2>SlgMap 与 SceneIns 的关系</h2>
+
+<p>根据架构设计，业务层分为有状态和无状态两层：</p>
+<table>
+    <thead>
+        <tr><th>层次</th><th>位置</th><th>职责</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><span class="tag tag-yellow">有状态层</span></td>
+            <td><code>serverfw/slgmap</code></td>
+            <td>格子管理、对象占据、行军寻路、AOI视野、领地连通性、预占逻辑等需要全局状态的计算</td>
+        </tr>
+        <tr>
+            <td><span class="tag tag-blue">无状态层</span></td>
+            <td><code>crossserver/module/slg</code></td>
+            <td>简单业务逻辑，通过 <code>ctrl</code> 包对接 SlgMap</td>
+        </tr>
+    </tbody>
+</table>
+
+<div class="note">
+    <strong>重要：</strong>每个 SceneInstance 内部有一个 SlgMap 实例（<code>ctrl.SlgMapInsByCtx(ctx)</code>），场景之间<strong>完全隔离</strong>。
+</div>
+
+<!-- ==================== 数据流 ==================== -->
+<h2>数据流与交互</h2>
+
+<div class="flow">
+客户端 <span class="arrow">←RPC→</span> majorserver <span class="arrow">←ME/RPC→</span> <span class="highlight">slgserver</span>(跨服)
+                                              <span class="arrow">↓</span>
+                                       <span class="highlight">SceneService</span> (框架运行时)
+                                              <span class="arrow">↓</span>
+                                   <span class="highlight">SceneInstance</span>(sceneId 隔离)
+                                              <span class="arrow">↓</span>
+                                      TSlgSceneInsMgr
+                                              <span class="arrow">↓</span>
+                             crossserver.TContext + slg业务逻辑
+                                              <span class="arrow">↓</span>
+                                    ctrl → <span class="highlight">SlgMap</span>(有状态服务)
+                                              <span class="arrow">↓</span>
+                                         独立数据库(db)
+</div>
+
+<!-- ==================== 总结 ==================== -->
+<h2>总结</h2>
+
+<p>这是一个<strong>以 SceneId 为核心隔离单元</strong>的架构：</p>
+<ul style="margin:8px 0 0 20px; line-height: 2;">
+    <li><span class="tag tag-red">SceneManager</span> 做调度</li>
+    <li><span class="tag tag-blue">SceneServer</span> 做承载</li>
+    <li><span class="tag tag-green">SceneInstance</span> 做逻辑隔离</li>
+    <li><span class="tag tag-yellow">SlgMap</span> 做有状态计算</li>
+</ul>
+<p style="margin-top:16px;">每一层各司其职，通过 RPC 和 etcd 服务发现串联，SceneId 是贯穿全链路的核心标识。</p>
+
+<div class="footer">Scene 架构层级说明 · 自动生成</div>
+
+</div>
+</body>
+</html>

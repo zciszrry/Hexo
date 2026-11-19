@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>pointeventtrigger 模块详解</title>
+<style>
+  body { font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; background:#f7f8fa; color:#1f2328; line-height:1.6; padding:24px; margin:0; }
+  .wrap { max-width:920px; margin:0 auto; }
+  h1 { font-size:22px; border-bottom:2px solid #e1e4e8; padding-bottom:10px; margin-bottom:20px; }
+  h2 { font-size:16px; color:#24292f; margin-top:28px; margin-bottom:10px; border-left:4px solid #0969da; padding-left:10px; }
+  h3 { font-size:14px; color:#333; margin-top:18px; margin-bottom:6px; }
+  p, li { font-size:13px; }
+  code { font-family:SFMono-Regular,Consolas,"Liberation Mono",monospace; background:#f0f2f5; padding:1px 5px; border-radius:3px; font-size:12px; color:#333; }
+  pre { background:#f5f6f8; padding:12px 14px; border-radius:6px; overflow-x:auto; font-size:12px; line-height:1.5; border:1px solid #e1e4e8; }
+  table { width:100%; border-collapse:collapse; font-size:12px; margin-top:8px; background:#fff; border:1px solid #d0d7de; }
+  th, td { border:1px solid #d0d7de; padding:8px 10px; text-align:left; }
+  th { background:#f5f6f8; font-weight:600; color:#333; }
+  .box { background:#fff; border:1px solid #d0d7de; border-radius:8px; padding:16px 18px; margin-bottom:16px; }
+  .muted { color:#656d76; font-size:12px; }
+  .tag { display:inline-block; background:#ddf4ff; color:#0969da; padding:1px 6px; border-radius:3px; font-size:11px; font-weight:600; margin-right:4px; }
+  .tag.warn { background:#fff8c5; color:#7d4e00; }
+  .tag.ok { background:#dafbe1; color:#1a7f37; }
+  ul.compact { margin:6px 0; padding-left:20px; }
+  ul.compact li { margin-bottom:4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>majorserver / pointeventtrigger 模块详解</h1>
+<p class="muted">定位：跨活动通用积分/任务进度触发器。监听游戏内玩家行为事件，按活动配置转化为积分并推送给客户端。</p>
+
+<div class="box">
+<h2>1. 模块结构</h2>
+<pre>pointeventtrigger/
+├── ipointeventtrigger.go              // 对外接口定义（IPointEventTrigger / IHandler / IExecutor / IData）
+├── pointeventtrigger_def.go           // TaskType 枚举 + IOC 单例入口
+├── point_event_trigger_ioc.go         // TPointEventTrigger：Handler 注册与事件分派
+├── point_event_trigger_defercall.go   // Succ/Fail DeferCall 实现（支持 Merge 累加）
+└── pointeventtriggerimpl/
+    ├── point_event_trigger_func_def.go    // TaskType→Func 映射 + EventId→TaskType 映射
+    ├── point_event_trigger_logic.go       // 24 种任务类型的积分计算逻辑
+    ├── point_event_trigger_obj.go         // TPointEventTriggerObj：玩家数据对象
+    ├── pointeventtrigger_rpc.go           // RPC：GetInterestActScore
+    └── point_event_trigger_in.go          // InModule：FindPointEventTrigger / AddPushScore</pre>
+</div>
+
+<div class="box">
+<h2>2. 核心架构与数据流</h2>
+<p>整个模块采用 <strong>事件监听 → 任务映射 → 活动分派 → DeferCall 合并 → 积分落地</strong> 的流水线：</p>
+<ol class="compact">
+<li><strong>事件监听</strong>：<code>achievementListener</code> 注册到 <code>logicfw</code> 全局事件总线，监听建筑完成、科研完成、训练完成、杀怪、使用道具等事件。</li>
+<li><strong>任务映射</strong>：通过 <code>EventIdToTaskType</code> 将一个游戏事件映射到 1~N 个 <code>TaskType</code>（如 <code>EventBuildComplete</code> 同时触发 <code>BuildingBuildOrUpgrade</code> 和 <code>BuildingBuildOrUpgradeLv</code>）。</li>
+<li><strong>Handler 遍历</strong>：通过 IOC 单例 <code>GetPointEventTriggerIoc().GetHandlersMap()</code> 遍历当前已注册的所有活动 Handler。</li>
+<li><strong>任务筛选</strong>：调用 <code>executor.GetRunningPhaseTaskIdByType(ctx, uid, types)</code> 获取该活动当前阶段中，对应类型的任务 ID 列表。</li>
+<li><strong>配置读取</strong>：通过 <code>executor.GetParamAndScoreByKey(ctx, taskId)</code> 读取策划配置参数 <code>confParam</code> 与单次积分 <code>score</code>。</li>
+<li><strong>进度计算</strong>：大多数任务采用 <strong>“累计余数 + 阈值取整”</strong> 模式：
+<pre>process = (旧进度 + 本次数值) % threshold
+获得积分 = (旧进度 + 本次数值) / threshold * score
+新进度 = process  // 保存到 DB</pre>
+</li>
+<li><strong>DeferCall 封装</strong>：调用 <code>OnIocActive</code> 将结果封装为 <code>TPointEventTriggerDeferCallSucc</code> 与 <code>TPointEventTriggerDeferCallFail</code> 加入上下文。同一帧内相同 executor 的多次调用会自动 <code>Merge</code> 累加 <code>paramsMap</code>。</li>
+<li><strong>积分落地</strong>：事务成功后，DeferCall 执行 <code>executor.OnIocActive</code>，将 <code>map[taskId]score</code> 真正写入活动积分系统。</li>
+<li><strong>客户端推送</strong>：<code>TPointEventTriggerObj.doAfterUpdate</code> 时通过 <code>push.OnActUserScoreChg</code> 将积分变化推送给玩家。</li>
+</ol>
+</div>
+
+<div class="box">
+<h2>3. 任务类型（TaskType）一览</h2>
+<p class="muted">共 24 种任务类型，覆盖 SLG 核心玩法行为：</p>
+<table>
+<tr><th>ID</th><th>枚举名</th><th>说明</th><th>典型参数过滤</th></tr>
+<tr><td>1</td><td>BuildingBuildOrUpgrade</td><td>建筑建造/升级</td><td>战力变化阈值、是否主城</td></tr>
+<tr><td>2</td><td>ResearchUpgrade</td><td>科研升级</td><td>战力变化阈值</td></tr>
+<tr><td>3</td><td>TrainSoldiers</td><td>训练士兵</td><td> soldierTid、晋升来源</td></tr>
+<tr><td>4</td><td>CostHeroPiece</td><td>消耗英雄碎片</td><td>碎片品质 color</td></tr>
+<tr><td>5</td><td>CollectResources</td><td>采集资源</td><td>资源类型 resTid</td></tr>
+<tr><td>6</td><td>TrainSoldierUnits</td><td>开始训练N个士兵</td><td>士兵等级</td></tr>
+<tr><td>7</td><td>KillMonsters</td><td>击杀普通怪</td><td>怪物等级范围</td></tr>
+<tr><td>8</td><td>HuntIceGiant</td><td>集结猎杀冰巨人</td><td>是否为集结队长</td></tr>
+<tr><td>9</td><td>QuickListAccelerate</td><td>加速队列</td><td>加速类型、加速时间(秒)</td></tr>
+<tr><td>10</td><td>BuyDiamondPack</td><td>购买钻石包</td><td>钻石数量</td></tr>
+<tr><td>11</td><td>UseItem</td><td>使用道具</td><td>道具 tid</td></tr>
+<tr><td>12</td><td>AdvancedRecruitment</td><td>高级招募</td><td>招募卡类型、次数</td></tr>
+<tr><td>13</td><td>MinimumHeroExpConsumption</td><td>消耗英雄经验</td><td>资源类型、数量</td></tr>
+<tr><td>14</td><td>ConsumePhysical</td><td>消耗体力</td><td>体力值</td></tr>
+<tr><td>15</td><td>CompleteRadarMissions</td><td>完成雷达任务</td><td>次数</td></tr>
+<tr><td>16</td><td>SendHighQualityFreight</td><td>发送高品质商队</td><td>商队品质</td></tr>
+<tr><td>18</td><td>KillSoldiersAlliance</td><td>联盟战击杀敌方士兵</td><td>士兵类型、敌方军团 gid</td></tr>
+<tr><td>19</td><td>KillSoldiers</td><td>击杀士兵</td><td>士兵类型、敌方军团 gid</td></tr>
+<tr><td>20</td><td>SoldierDeath</td><td>士兵阵亡</td><td>士兵等级</td></tr>
+<tr><td>21</td><td>ConsumedXFighterFragmentsOfYQuality</td><td>消耗某品质 Fighter 碎片</td><td>碎片类型、数量</td></tr>
+<tr><td>22</td><td>OrangeDispatchTasks</td><td>执行橙色隐秘任务</td><td>橙色任务数量</td></tr>
+<tr><td>23</td><td>TrainSoldierUnitsUpLv</td><td>训练 N 级以上士兵</td><td>士兵等级</td></tr>
+<tr><td>24</td><td>BuildingBuildOrUpgradeLv</td><td>建造/升级建筑（次数版）</td><td>升级次数</td></tr>
+</table>
+</div>
+
+<div class="box">
+<h2>4. 关键数据结构</h2>
+<h3>4.1 玩家数据对象 TPointEventTriggerObj</h3>
+<p>每个玩家对应一条 DB 记录，结构为：</p>
+<pre>TPointEventTrigger
+ └── ActivityData[]          // 活动列表
+      └── ActivityId
+      └── TaskData[]         // 该活动下的任务进度列表
+           └── TaskTemplateID
+           └── Progress      // 当前任务进度余数</pre>
+<p>通过 <code>GetProcessByActIdAndTaskId / SetProcessByActIdAndTaskId</code> 读写。首次访问时若 DB 无记录，自动初始化空结构。</p>
+
+<h3>4.2 DeferCall 合并机制</h3>
+<p><code>TPointEventTriggerDeferCallSucc.Merge</code> 会在同一事务帧内，将相同 executor 的多次调用参数按 key 累加：</p>
+<pre>for key, value := range source.paramsMap {
+    if _, exist := this.paramsMap[key]; exist {
+        this.paramsMap[key] += value
+    } else {
+        this.paramsMap[key] = value
+    }
+}</pre>
+<p>这样可以避免玩家一次操作触发大量零散积分写入，减少下游压力。</p>
+</div>
+
+<div class="box">
+<h2>5. 活动对接方式（多活动并行）</h2>
+<p>模块通过 <code>IPointEventTriggerHandler</code> 与具体活动解耦：</p>
+<ul class="compact">
+<li><code>RegisterPointEventTriggerHandler(activityId int32, handler IPointEventTriggerHandler)</code>：活动在开启时注册自己的 Handler。</li>
+<li><code>IPointEventTriggerHandler.IsStart()</code>：判断活动是否处于进行状态。</li>
+<li><code>IPointEventTriggerHandler.GetExecutor()</code>：返回活动的 Executor，负责读取本活动的任务配置、计算当前阶段任务 ID、校验条件。</li>
+</ul>
+<p>因此，<strong>同一个游戏行为事件可以同时向多个活动贡献积分</strong>。例如一次建筑升级，可能同时计入“联盟决斗”、“军备竞赛”、“七日活动”等多个活动的任务进度。</p>
+</div>
+
+<div class="box">
+<h2>6. 对外接口</h2>
+<table>
+<tr><th>接口</th><th>位置</th><th>说明</th></tr>
+<tr><td><code>FindPointEventTrigger(uid)</code></td><td>IInPointEventTriggerObj</td><td>获取玩家积分数据对象</td></tr>
+<tr><td><code>AddPushScore(uid, actType, newScore, oldScore, extData)</code></td><td>IInPointEventTriggerModule</td><td>外部模块直接写入积分变化并推送（用于非事件触发场景）</td></tr>
+<tr><td><code>GetInterestActScore(req, rsp)</code></td><td>IRpcPointEventTriggerModule</td><td>查询玩家感兴趣的活动当前分数（联盟决斗、跨服联盟决斗、军备竞赛）</td></tr>
+</table>
+</div>
+
+<div class="box">
+<h2>7. 要点总结</h2>
+<ul class="compact">
+<li><strong>通用化设计</strong>：通过 <code>TaskType + EventId 映射 + Handler/Executor 抽象</code>，实现了一套代码支撑多个活动并行计分。</li>
+<li><strong>进度余数保存</strong>：几乎所有任务类型都保存 <code>Progress</code> 余数，支持策划配置任意阈值（如“每消耗 100 体力得 1 分”），避免数值溢出或精度丢失。</li>
+<li><strong>DeferCall 合并</strong>：利用 logicfw 的延迟调用机制，将一帧内多次操作合并为一次下游写入，提升性能。</li>
+<li><strong>条件过滤丰富</strong>：支持按建筑类型、士兵等级、道具ID、怪物等级范围、商队品质、敌方军团等维度进行任务匹配。</li>
+<li><strong>双保险 Defer</strong>：每个调用同时注册 Succ 和 Fail DeferCall，Fail 时仅打印日志不做实际积分变更，确保事务一致性。</li>
+</ul>
+</div>
+
+</div>
+</body>
+</html>

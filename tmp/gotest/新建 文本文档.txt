@@ -1,0 +1,19 @@
+方法的参数使用小写字母'a'开头，全局变量使用小写的字母‘g’开头
+如果是结构体则用大写的‘T’开头， 如果是函数则以大写的‘F’开头，如果是接口则用大写的‘I’开头
+常量或静态只读使用全大写，每个单词之间用下划线
+文件夹的命名：考虑到Windows和Linux对大小写敏感的不同，必须全部采用小写的方式
+
+
+_def.go		常量
+.go			定义接口
+	IInSimOrderModule	
+					-GetAttr	->_in.go:	getAttr	->_logic.go:			
+	IInSimOrderFata		
+					-FindData
+	IRpcSimOrderModule
+					-GetInfo
+					……
+					-GetBookREward	
+	ISimOrderData
+					-GetId
+					-GetKey

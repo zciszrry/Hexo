@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>majorserver - Task 模块详解</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.7;
+            color: #333;
+            background: #fafafa;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            background: #fff;
+            padding: 48px 56px;
+            border: 1px solid #e0e0e0;
+        }
+        h1 {
+            font-size: 28px;
+            font-weight: 600;
+            border-bottom: 2px solid #333;
+            padding-bottom: 12px;
+            margin-bottom: 32px;
+        }
+        h2 {
+            font-size: 20px;
+            font-weight: 600;
+            margin-top: 40px;
+            margin-bottom: 16px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #ddd;
+        }
+        h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-top: 24px;
+            margin-bottom: 10px;
+        }
+        p { margin-bottom: 12px; }
+        code {
+            font-family: "Fira Code", "JetBrains Mono", Consolas, monospace;
+            font-size: 13px;
+            background: #f4f4f4;
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+        pre {
+            background: #f7f7f7;
+            border: 1px solid #e0e0e0;
+            padding: 16px 20px;
+            margin: 12px 0 20px;
+            overflow-x: auto;
+            font-size: 13px;
+            line-height: 1.5;
+            font-family: "Fira Code", "JetBrains Mono", Consolas, monospace;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0 20px;
+            font-size: 14px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px 12px;
+            text-align: left;
+        }
+        th {
+            background: #f5f5f5;
+            font-weight: 600;
+        }
+        tr:nth-child(even) { background: #fafafa; }
+        .note {
+            background: #f9f9f9;
+            border-left: 3px solid #999;
+            padding: 12px 16px;
+            margin: 16px 0;
+            font-size: 14px;
+        }
+        .file-path {
+            color: #555;
+            font-size: 13px;
+            font-style: italic;
+        }
+        ul { padding-left: 24px; margin-bottom: 12px; }
+        li { margin-bottom: 6px; }
+        .diagram {
+            background: #fdfdfd;
+            border: 1px solid #e0e0e0;
+            padding: 20px;
+            margin: 16px 0;
+            text-align: center;
+            font-family: monospace;
+            font-size: 13px;
+            line-height: 1.8;
+            white-space: pre;
+        }
+        .section-intro {
+            color: #555;
+            font-size: 15px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+
+<h1>majorserver / module / task &mdash; 任务模块详解</h1>
+
+<p class="section-intro">
+    Task 模块是 majorserver 中负责游戏任务（Quest）系统的核心业务模块。它管理了主线任务、日常任务、章节任务、公会任务等多种任务类型的接取、进度追踪、完成判定和奖励发放。
+</p>
+
+<!-- ==================== 目录结构 ==================== -->
+<h2>1. 目录结构</h2>
+
+<pre>majorserver/module/task/
+├── itask.go                  # 接口定义层（模块接口、数据接口、RPC接口）
+├── task_def.go               # 常量定义 &amp; 事件-任务类型映射表
+├── tasktype_def.go           # 策划定义的任务类型常量
+└── taskimpl/                 # 具体实现
+    ├── task_in.go            # 数据访问实现（TInTaskModule）
+    ├── task_events.go        # 事件监听 &amp; 事件驱动的任务处理
+    ├── task_rpc.go           # RPC 请求处理（TRpcTaskModule）
+    ├── task_logic.go         # 核心逻辑（奖励发放、完成判定）
+    ├── task_type_func.go     # 任务类型函数注册表（TaskTypeFuncMap）
+    ├── task_process_newtask.go  # 各任务类型的进度计算函数
+    ├── task_util.go          # 工具函数（数据查找、任务接取、重置等）
+    ├── task_cron.go          # 定时任务（目前已注释停用）
+    ├── cumulative_obj.go     # 累计数据对象
+    ├── task_main_obj.go      # 主线任务数据对象
+    ├── task_daily_obj.go     # 日常任务数据对象
+    ├── task_chapter_obj.go   # 章节任务数据对象
+    ├── task_completed_obj.go # 已完成任务数据对象
+    ├── task_guild_obj.go     # 公会任务数据对象
+    └── *_auto.go             # 自动生成的数据绑定代码
+</pre>
+
+<!-- ==================== 架构总览 ==================== -->
+<h2>2. 架构总览</h2>
+
+<div class="diagram">
+┌──────────────────────────────────────────────────────────┐
+│                     Client (客户端)                        │
+└───────────────────────────┬──────────────────────────────┘
+                            │  RPC 请求
+                            ▼
+┌──────────────────────────────────────────────────────────┐
+│              TRpcTaskModule (task_rpc.go)                  │
+│  FetchMainTasks / FetchDailyTasks / FetchChapterTasks     │
+│  TakeMainTaskAward / TakeDailyTaskAward / ...             │
+└───────────────────────────┬──────────────────────────────┘
+                            │
+          ┌─────────────────┼─────────────────┐
+          ▼                 ▼                 ▼
+┌────────────────┐ ┌────────────────┐ ┌────────────────────┐
+│  事件驱动层     │ │  数据访问层     │ │  任务类型处理层      │
+│ (task_events)  │ │  (task_in)     │ │ (task_type_func +   │
+│ onEventTask()  │ │ TInTaskModule  │ │  task_process_*)    │
+│ handleTasks()  │ │ FindXxxData()  │ │  TaskTypeFuncMap    │
+└───────┬────────┘ └───────┬────────┘ └─────────┬──────────┘
+        │                  │                     │
+        └──────────────────┼─────────────────────┘
+                           ▼
+┌──────────────────────────────────────────────────────────┐
+│                 DB 持久层 (tables.*)                       │
+│  TTaskMain / TTaskDaily / TTaskChapter / TTaskCompleted   │
+│  TTaskGuild / TCumulative                                 │
+└──────────────────────────────────────────────────────────┘
+</div>
+
+<!-- ==================== 任务模块分类 ==================== -->
+<h2>3. 任务模块分类</h2>
+
+<table>
+    <tr>
+        <th>模块常量</th>
+        <th>值</th>
+        <th>名称</th>
+        <th>说明</th>
+    </tr>
+    <tr>
+        <td><code>TASK_MOD_MAIN</code></td>
+        <td>1</td>
+        <td>主线任务</td>
+        <td>线性链式推进，完成前置任务后自动接取后续任务</td>
+    </tr>
+    <tr>
+        <td><code>TASK_MOD_DAILY</code></td>
+        <td>2</td>
+        <td>日常任务</td>
+        <td>每日重置，完成后获得积分可领取宝箱奖励</td>
+    </tr>
+    <tr>
+        <td><code>TASK_MOD_CHAPTER</code></td>
+        <td>3</td>
+        <td>章节任务</td>
+        <td>按章节分组，一章内所有任务完成后可领取章节大奖并解锁下一章</td>
+    </tr>
+    <tr>
+        <td><code>TASK_MOD_SPECIAL</code></td>
+        <td>4</td>
+        <td>特殊事件任务</td>
+        <td>已废弃（Deprecated），代码中保留但不再使用</td>
+    </tr>
+</table>
+
+<p>此外还有<strong>公会任务</strong>（GuildTask），以公会维度进行积分统计，按周重置。</p>
+
+<!-- ==================== 接口定义 ==================== -->
+<h2>4. 接口定义层（itask.go）</h2>
+
+<p class="file-path">文件：majorserver/module/task/itask.go</p>
+
+<p>该文件定义了三大类接口：</p>
+
+<h3>4.1 IInTaskModule &mdash; 模块内部调用接口</h3>
+<pre>type IInTaskModule interface {
+    IncreaseNum(aUid uint64, CumulativeId int32, num uint64) uint64
+    IncreaseNumExt(aUid uint64, CumulativeId int32, num uint64, extId uint64) uint64
+    GetCompleteChapterTaskId(aUid uint64) int
+    IsSpecialFinish(aUid uint64, taskData tables.TaskData) (uint64, bool)
+    CheckTaskProcess(aUid uint64, aTaskType int32, ...)
+    CheckTasksFinished(aUid uint64, aTasks []int32) bool
+}</pre>
+<p>供其他模块（如功能开放模块）调用，用于增加累计计数、检查任务是否完成等。</p>
+
+<h3>4.2 IInTaskData &mdash; 数据查找接口</h3>
+<pre>type IInTaskData interface {
+    FindMainTaskData(aUid uint64, createIfNotExist bool) (IMainTaskData, error)
+    FindDailyTaskData(aUid uint64, createIfNotExist bool) (IDailyTaskData, error)
+    FindChapterTaskData(aUid uint64, createIfNotExist bool) (IChapterTaskData, error)
+    FindCompletedTaskData(aUid uint64, createIfNotExist bool) (ICompletedTaskData, error)
+    FindGuildTaskData(aGid uint64) (IGuildTaskData, error)
+    FindCumulativeData(aUid uint64) (ICumulativeData, error)
+}</pre>
+<p>统一的数据查找入口，支持"不存在则创建"的语义。</p>
+
+<h3>4.3 IRpcTaskModule &mdash; RPC 接口</h3>
+<pre>type IRpcTaskModule interface {
+    FetchMainTasks(aReq, aRsp)       // 查询主线任务
+    FetchDailyTasks(aReq, aRsp)      // 查询日常任务
+    FetchChapterTasks(aReq, aRsp)    // 查询章节任务
+    FetchGuildTasks(aReq, aRsp)      // 查询公会任务
+    TakeMainTaskAward(aReq, aRsp)    // 领取主线奖励
+    TakeDailyTaskAward(aReq, aRsp)   // 领取日常奖励
+    TakeChapterTaskAward(aReq, aRsp) // 领取章节任务奖励
+    TakeChapterAward(aReq, aRsp)     // 领取章节大奖
+    TakeDailyPointsAward(aReq, aRsp) // 领取日常积分宝箱
+    TakeDailyAllTaskAward(aReq, aRsp)// 一键领取日常所有奖励
+    GetTFinishedTaskNum(aReq, aRsp)  // 获取已完成任务数红点信息
+}</pre>
+
+<!-- ==================== 数据模型 ==================== -->
+<h2>5. 数据模型</h2>
+
+<h3>5.1 任务数据接口</h3>
+
+<table>
+    <tr>
+        <th>接口</th>
+        <th>DB 表</th>
+        <th>核心字段</th>
+    </tr>
+    <tr>
+        <td><code>IMainTaskData</code></td>
+        <td>TTaskMain</td>
+        <td>FinishedMainTasks, RunningMainTasks, FirstFlag, UnLocked</td>
+    </tr>
+    <tr>
+        <td><code>IDailyTaskData</code></td>
+        <td>TTaskDaily</td>
+        <td>FinishedDailyTasks, RunningDailyTasks, DailyScore, LastResetTime, PointRewardTidList</td>
+    </tr>
+    <tr>
+        <td><code>IChapterTaskData</code></td>
+        <td>TTaskChapter</td>
+        <td>RunningChapters, FinishedChapters, FinishedTasks, CompletedTasks, UnLockChapter</td>
+    </tr>
+    <tr>
+        <td><code>ICompletedTaskData</code></td>
+        <td>TTaskCompleted</td>
+        <td>CompletedMainTasks, CompletedDailyTasks, CompletedChapterTasks, CompletedChapters</td>
+    </tr>
+    <tr>
+        <td><code>IGuildTaskData</code></td>
+        <td>TTaskGuild</td>
+        <td>Members (uid-score pairs), NextResetTime</td>
+    </tr>
+    <tr>
+        <td><code>ICumulativeData</code></td>
+        <td>TCumulative</td>
+        <td>各类累计计数器（建筑、科技、训练、采集等）</td>
+    </tr>
+</table>
+
+<h3>5.2 任务状态流转</h3>
+
+<div class="diagram">
+任务单条状态：
+    Running（进行中）──→ Finished（已完成/待领奖）──→ Completed（已领奖）
+
+章节状态：
+    Running ──→ Finished（所有子任务完成）──→ Completed（领取章节奖励）
+</div>
+
+<h3>5.3 AbstractTask 接口</h3>
+<pre>type AbstractTask interface {
+    GetProgress() uint64        // 当前进度
+    SetProgress(p uint64)       // 设置进度
+    GetTaskTemplateID() int32   // 任务配置ID
+    GetStartTimestamp() int64   // 接取时间戳
+}</pre>
+<p>这是所有任务数据的通用抽象，被任务类型处理函数使用。</p>
+
+<!-- ==================== 事件驱动 ==================== -->
+<h2>6. 事件驱动机制</h2>
+
+<p class="file-path">文件：majorserver/module/task/task_def.go &amp; taskimpl/task_events.go</p>
+
+<h3>6.1 事件-任务类型映射（TaskEvent）</h3>
+<p>
+    <code>task_def.go</code> 中定义了 <code>TaskEvent map[int32][]int32</code>，将游戏事件ID映射到可能受影响的任务类型列表。例如：
+</p>
+<pre>event.EventBuildComplete:  {TaskType_10031, TaskType_20031, TaskType_10233, TaskType_10008, TaskType_10000, TaskType_10311}
+event.EventHeroRecruited:  {TaskType_10063, TaskType_20063, TaskType_10401, TaskType_20401}
+event.EventSLGKillSoldiers:{TaskType_10377, TaskType_20377}</pre>
+<p>当游戏中发生某个事件时，系统查表获知哪些任务类型可能受影响，然后对相关任务逐一检查进度。</p>
+
+<h3>6.2 事件监听注册</h3>
+<pre>func init() {
+    logicfw.AddEventListener(event.AllEvent, onGuildStart)
+    logicfw.AddEventListener(event.AllEvent, onEventTask)
+}</pre>
+<p>注册了两个全局事件监听器：</p>
+<ul>
+    <li><code>onGuildStart</code>：检测章节任务解锁条件，首次满足时初始化第一章任务</li>
+    <li><code>onEventTask</code>：核心任务进度推进入口，接收所有事件并驱动任务处理</li>
+</ul>
+
+<h3>6.3 事件处理流程（onEventTask）</h3>
+<div class="diagram">
+事件派发 (DispatchEvent)
+        │
+        ▼
+onEventTask(event)
+        │
+        ├── 查询 TaskEvent[event.EventId] 获取相关任务类型列表
+        │
+        ├── 从 TaskTypeFuncMap 中获取对应处理函数
+        │
+        ▼
+handleTasks(ctx, handler)
+        │
+        ├── 1. 处理日常任务 (doDailyTask)
+        ├── 2. 处理章节任务 (doChapterTask)
+        └── 3. 处理主线任务 (doMainTask)
+              │
+              └── 若有主线任务完成 → acceptMainTask() 接取后续任务
+</div>
+
+<!-- ==================== 任务类型处理 ==================== -->
+<h2>7. 任务类型处理函数</h2>
+
+<p class="file-path">文件：taskimpl/task_type_func.go &amp; task_process_newtask.go</p>
+
+<h3>7.1 函数签名</h3>
+<pre>type FUNCPARAM func(
+    r task.AbstractTask,           // 任务数据对象
+    aTaskParam conftable.IntArr1,  // 策划配置的参数数组
+    ctx *majorserver.TContext,     // 上下文
+    aEventId int32,                // 事件ID（0表示接取时调用）
+    aEventData []interface{},      // 事件附带数据
+    aTaskMod int32,                // 所属任务模块(1/2/3)
+    aUid uint64,                   // 玩家UID
+) (uint64, uint64)                 // 返回值：(当前进度, 目标值)</pre>
+
+<h3>7.2 累计型 vs 周期型</h3>
+<table>
+    <tr>
+        <th>类型前缀</th>
+        <th>含义</th>
+        <th>接取时(eventId=0)行为</th>
+        <th>示例</th>
+    </tr>
+    <tr>
+        <td><code>1xxxx</code></td>
+        <td>累计型（创建角色后全程计数）</td>
+        <td>从 CumulativeData 读取历史累计值</td>
+        <td>10031：累计完成x次城建</td>
+    </tr>
+    <tr>
+        <td><code>2xxxx</code></td>
+        <td>周期型（接取任务后开始计数）</td>
+        <td>初始化进度为 0</td>
+        <td>20031：完成x次城建</td>
+    </tr>
+    <tr>
+        <td><code>3xxxx</code></td>
+        <td>开始型（接取任务后，事件开始时计数）</td>
+        <td>初始化进度为 0</td>
+        <td>30031：开始x次建筑升级</td>
+    </tr>
+</table>
+
+<h3>7.3 TaskTypeFuncMap 注册表</h3>
+<p>
+    <code>TaskTypeFuncMap</code> 是一个 <code>map[int32]FUNCPARAM</code>，存储了所有任务类型的处理函数。
+    当事件触发时，系统通过任务类型ID查找对应函数并调用，实现进度更新。
+</p>
+
+<div class="note">
+<strong>设计要点：</strong>任务类型函数同时承担两种调用场景——
+当 <code>aEventId == 0</code> 时表示"接取任务时的初始化检查"，通常读取累计数据填充初始进度；
+当 <code>aEventId > 0</code> 时表示"事件触发的增量更新"，对进度进行增量操作。
+</div>
+
+<!-- ==================== 主线任务 ==================== -->
+<h2>8. 主线任务流程</h2>
+
+<h3>8.1 初始化</h3>
+<p>玩家创建角色时调用 <code>initMainTaskData</code> → <code>initMainTaskDataLogic</code>：</p>
+<ul>
+    <li>遍历所有主线任务配置，接取无前置条件的任务（<code>NeedStandTask == 0</code>）</li>
+    <li>对每个新任务调用类型函数检查是否已满足完成条件</li>
+    <li>满足条件的直接标记为 Finished，否则标记为 Running</li>
+    <li>循环处理：已完成的任务可能解锁后续前置任务，继续接取并检查</li>
+</ul>
+
+<h3>8.2 事件驱动进度推进（doMainTask）</h3>
+<ul>
+    <li>遍历所有 Running 状态的主线任务</li>
+    <li>对每个任务根据类型查找处理函数，传入事件数据更新进度</li>
+    <li>进度达标的任务标记为 Finished，并通过 <code>push.TaskMainChangeNotify</code> 通知客户端</li>
+</ul>
+
+<h3>8.3 领奖与后续接取（acceptMainTask）</h3>
+<ul>
+    <li>领奖时一次性领取所有 Finished 的主线任务奖励</li>
+    <li>将任务状态从 Finished 推进到 Completed</li>
+    <li>检查已完成任务是否是其他任务的前置，若是则自动接取后续任务</li>
+    <li>后续任务接取后同样立即检查是否可完成（链式推进）</li>
+</ul>
+
+<!-- ==================== 日常任务 ==================== -->
+<h2>9. 日常任务流程</h2>
+
+<h3>9.1 每日重置（resetDailyTasks）</h3>
+<ul>
+    <li>通过比较 <code>lastResetTime</code> 与当前时间判断是否跨天</li>
+    <li>跨天则清空所有任务数据，重新从配置中接取全部日常任务</li>
+    <li>同步重置 CompletedTaskData 中的日常任务完成记录</li>
+</ul>
+
+<h3>9.2 积分系统</h3>
+<ul>
+    <li>完成日常任务后领取奖励时，同步获得积分（存储在 User 模块的 ERTask 资源中）</li>
+    <li>积分达到阈值后可领取积分宝箱（DailyTaskBox）</li>
+    <li>积分同时贡献给公会活跃度（GuildTask.IncreaseScore）</li>
+</ul>
+
+<h3>9.3 一键领取（TakeDailyAllTaskAward）</h3>
+<p>一次性领取所有已完成的日常任务奖励 + 满足条件的积分宝箱奖励。</p>
+
+<!-- ==================== 章节任务 ==================== -->
+<h2>10. 章节任务流程</h2>
+
+<h3>10.1 解锁与接取</h3>
+<ul>
+    <li>通过 <code>onGuildStart</code> 事件监听器检测开放条件（<code>GateOfChapterTask</code>）</li>
+    <li>条件满足后初始化第一章任务（<code>acceptChapterTaskNew</code>）</li>
+    <li>支持 A/B 测试分组（<code>TaskAB</code> 字段），不同分组的玩家看到不同任务</li>
+</ul>
+
+<h3>10.2 进度推进（doChapterTask）</h3>
+<ul>
+    <li>遍历当前 Running 章节中所有子任务</li>
+    <li>过滤掉已完成/已领奖的任务，仅处理进行中的</li>
+    <li>进度达标的子任务标记为 Finished</li>
+</ul>
+
+<h3>10.3 领奖与章节推进</h3>
+<ul>
+    <li><code>TakeChapterTaskAward</code>：领取单个章节子任务奖励，状态从 Finished → Completed</li>
+    <li><code>TakeChapterAward</code>：领取整章大奖 + 自动领取未领的子任务奖励</li>
+    <li>章节完成后自动接取下一章任务（<code>acceptChapterTaskNew(chapterId+1)</code>）</li>
+</ul>
+
+<!-- ==================== 公会任务 ==================== -->
+<h2>11. 公会任务</h2>
+
+<ul>
+    <li>以公会（Guild）为单位统计成员活跃积分</li>
+    <li>成员完成日常任务领奖时，增量累加到 <code>GuildTaskData.Members</code></li>
+    <li>按周重置，重置时间通过 <code>NextResetTime</code> 控制</li>
+    <li><code>FetchGuildTasks</code> 返回成员积分排名和倒计时</li>
+</ul>
+
+<!-- ==================== 累计计数 ==================== -->
+<h2>12. 累计计数系统（ICumulativeData）</h2>
+
+<p>
+    CumulativeData 是独立于任务状态的全局计数器，记录玩家自创建角色以来的各类行为次数。
+    累计型任务（1xxxx前缀）在接取时从此数据中读取初始进度。
+</p>
+
+<h3>核心方法</h3>
+<table>
+    <tr><th>方法</th><th>说明</th></tr>
+    <tr><td><code>IncreaseNum(id, num)</code></td><td>增加指定计数器的值</td></tr>
+    <tr><td><code>IncreaseNumExt(id, num, extId)</code></td><td>带扩展ID的增量（如区分资源类型）</td></tr>
+    <tr><td><code>GetNum(id)</code></td><td>获取计数器当前值</td></tr>
+    <tr><td><code>GetNumExt(id, extId)</code></td><td>获取带扩展ID的计数值</td></tr>
+    <tr><td><code>GetNumExtAbove(id, extId)</code></td><td>获取扩展ID以上的累计值</td></tr>
+    <tr><td><code>GetNumArmy(id, level)</code></td><td>获取指定等级以上的士兵累计训练数</td></tr>
+</table>
+
+<!-- ==================== 事件映射表 ==================== -->
+<h2>13. 事件映射表（部分）</h2>
+
+<table>
+    <tr><th>事件</th><th>关联任务类型</th><th>含义</th></tr>
+    <tr><td>EventBuildComplete</td><td>10031, 20031, 10233, 10008, 10000, 10311</td><td>建筑建造完成</td></tr>
+    <tr><td>EventBuildUpgradeComplete</td><td>10031, 20031, 10233, 10008, 10000, 10311</td><td>建筑升级完成</td></tr>
+    <tr><td>EventScienceResearchCompleted</td><td>10330, 20330</td><td>科技研究完成</td></tr>
+    <tr><td>EventFinishSoldierTrain</td><td>10021, 20021</td><td>士兵训练完成</td></tr>
+    <tr><td>EventMarchCollect</td><td>10087, 20087, 10009, 20009, 10023, 20023</td><td>采集资源</td></tr>
+    <tr><td>EventHeroRecruited</td><td>10063, 20063, 10401, 20401</td><td>英雄招募</td></tr>
+    <tr><td>EventSLGKillCommonMonster</td><td>10321, 20321, 10396</td><td>击杀野怪</td></tr>
+    <tr><td>EventSLGAttackCity</td><td>10388, 20388</td><td>攻击主城</td></tr>
+    <tr><td>EventUserEnterGame</td><td>10083, 20083</td><td>登录游戏</td></tr>
+    <tr><td>EventGuildDonation</td><td>10055, 20055</td><td>联盟捐献</td></tr>
+    <tr><td>EventRobEscort</td><td>10376, 20376, 21000</td><td>劫镖</td></tr>
+    <tr><td>EventFightForceChange</td><td>10218</td><td>战力变化</td></tr>
+</table>
+
+<!-- ==================== RPC接口 ==================== -->
+<h2>14. RPC 接口详解</h2>
+
+<table>
+    <tr><th>接口</th><th>请求</th><th>响应</th><th>功能</th></tr>
+    <tr>
+        <td>FetchMainTasks</td>
+        <td>TEmptyReq</td>
+        <td>TFetchMainTasksRsp</td>
+        <td>返回 Running + Finished + Completed 三个列表</td>
+    </tr>
+    <tr>
+        <td>FetchDailyTasks</td>
+        <td>TEmptyReq</td>
+        <td>TFetchDailyTasksRsp</td>
+        <td>含跨天重置逻辑，返回任务列表 + 当前积分 + 已领宝箱ID</td>
+    </tr>
+    <tr>
+        <td>FetchChapterTasks</td>
+        <td>TEmptyReq</td>
+        <td>TFetchChapterTasksRsp</td>
+        <td>返回 RunningChapter + FinishedChapters + Completed + 解锁章节</td>
+    </tr>
+    <tr>
+        <td>TakeMainTaskAward</td>
+        <td>TTakeMainTaskAwardReq</td>
+        <td>TTakeMainTaskAwardRsp</td>
+        <td>批量领取所有已完成主线任务奖励</td>
+    </tr>
+    <tr>
+        <td>TakeDailyTaskAward</td>
+        <td>TTakeDailyTaskAwardReq</td>
+        <td>TTakeDailyTaskAwardRsp</td>
+        <td>领取指定日常任务奖励，同步增加公会活跃</td>
+    </tr>
+    <tr>
+        <td>TakeDailyAllTaskAward</td>
+        <td>TEmptyReq</td>
+        <td>TTakeDailyAllTaskAwardRsp</td>
+        <td>一键领取全部日常 + 积分宝箱</td>
+    </tr>
+    <tr>
+        <td>TakeChapterTaskAward</td>
+        <td>TTakeChapterTaskAwardReq</td>
+        <td>TTakeChapterTaskAwardRsp</td>
+        <td>领取指定章节子任务奖励（支持批量）</td>
+    </tr>
+    <tr>
+        <td>TakeChapterAward</td>
+        <td>TTakeChapterAwardReq</td>
+        <td>TTakeChapterAwardRsp</td>
+        <td>领取章节大奖 + 未领子任务，触发下一章解锁</td>
+    </tr>
+    <tr>
+        <td>TakeDailyPointsAward</td>
+        <td>TTakeDailyPointsAwardReq</td>
+        <td>TTakeDailyPointsAwardRsp</td>
+        <td>领取日常积分阶段宝箱</td>
+    </tr>
+    <tr>
+        <td>FetchGuildTasks</td>
+        <td>TEmptyReq</td>
+        <td>TFetchGuildTasksRsp</td>
+        <td>公会活跃积分排名 + 重置倒计时</td>
+    </tr>
+    <tr>
+        <td>GetTFinishedTaskNum</td>
+        <td>TEmptyReq</td>
+        <td>TFinishedTaskNum</td>
+        <td>返回各模块待领奖任务数（红点用）</td>
+    </tr>
+</table>
+
+<!-- ==================== 推送通知 ==================== -->
+<h2>15. 客户端推送通知</h2>
+
+<table>
+    <tr><th>消息名称</th><th>触发时机</th><th>内容</th></tr>
+    <tr><td><code>push.TaskMainChangeNotify</code></td><td>主线任务进度变化/完成</td><td>变化的任务ID + 当前进度</td></tr>
+    <tr><td><code>push.TaskDailyChangeNotify</code></td><td>日常任务进度变化/完成</td><td>变化的任务ID + 当前进度</td></tr>
+    <tr><td><code>push.TaskChapterChangeNotify</code></td><td>章节任务进度变化/完成</td><td>变化的任务ID + 当前进度</td></tr>
+    <tr><td><code>push.AcceptedPretasksNotify</code></td><td>预加载任务被接取</td><td>任务数据（Running状态）</td></tr>
+    <tr><td><code>push.FinishedPretasksNotify</code></td><td>预加载任务完成</td><td>任务数据（Finished状态）</td></tr>
+    <tr><td><code>push.TaskFinishedForOpenFunctionNotify</code></td><td>任务完成触发功能开放</td><td>任务类型 + 任务ID</td></tr>
+</table>
+
+<!-- ==================== 并发与数据安全 ==================== -->
+<h2>16. 并发与数据安全</h2>
+
+<p>所有 RPC 接口和事件处理函数在操作数据前都会调用：</p>
+<pre>context.LockUserData(uid)    // 用户维度加锁
+context.LockGuildData(gid)   // 公会维度加锁（涉及公会数据时）</pre>
+<p>确保同一用户/公会的数据在并发请求下不会产生竞态条件。数据初始化采用 "Insert失败则重新Get" 的策略处理并发创建场景。</p>
+
+<!-- ==================== 配置依赖 ==================== -->
+<h2>17. 配置表依赖</h2>
+
+<table>
+    <tr><th>配置接口</th><th>说明</th></tr>
+    <tr><td><code>GetConfStandTaskByKey/Index/Num</code></td><td>主线任务配置</td></tr>
+    <tr><td><code>GetConfDailyTaskByKey/Index/Num</code></td><td>日常任务配置</td></tr>
+    <tr><td><code>GetConfChapterTaskByKey/Index/Num</code></td><td>章节任务配置</td></tr>
+    <tr><td><code>GetConfChapterByKey</code></td><td>章节配置（章节奖励）</td></tr>
+    <tr><td><code>GetConfDailyTaskBoxByIndex/Num</code></td><td>日常积分宝箱配置</td></tr>
+    <tr><td><code>GetGameControlCustom</code></td><td>功能开放条件配置</td></tr>
+    <tr><td><code>GetConfCastleBuildingByKey</code></td><td>建筑配置</td></tr>
+    <tr><td><code>GetConfSoldierTrainByKey</code></td><td>士兵训练配置</td></tr>
+    <tr><td><code>GetConfWorldMonsterByKey</code></td><td>世界怪物配置</td></tr>
+</table>
+
+<!-- ==================== 关键设计总结 ==================== -->
+<h2>18. 关键设计总结</h2>
+
+<table>
+    <tr><th>设计点</th><th>实现方式</th></tr>
+    <tr>
+        <td>事件驱动</td>
+        <td>全局事件总线 + TaskEvent映射表 + TaskTypeFuncMap 函数分发</td>
+    </tr>
+    <tr>
+        <td>任务链式推进</td>
+        <td>主线任务通过 NeedStandTask 形成 DAG，完成后自动接取后续</td>
+    </tr>
+    <tr>
+        <td>累计/周期双模式</td>
+        <td>1xxxx从CumulativeData读历史值，2xxxx/3xxxx从0计数</td>
+    </tr>
+    <tr>
+        <td>进度实时推送</td>
+        <td>进度变化时通过 SendMsg 推送 ChangeNotify 给客户端</td>
+    </tr>
+    <tr>
+        <td>跨天重置</td>
+        <td>日常任务在 Fetch 时检测跨天，懒加载式重置</td>
+    </tr>
+    <tr>
+        <td>配置热更友好</td>
+        <td>任务接取和检查逻辑均动态查配置表，不硬编码ID</td>
+    </tr>
+    <tr>
+        <td>AB测试支持</td>
+        <td>章节任务通过 TaskAB 字段区分玩家分组</td>
+    </tr>
+    <tr>
+        <td>功能开放联动</td>
+        <td>章节任务完成后触发 doOpenFunction 解锁游戏功能</td>
+    </tr>
+</table>
+
+<div class="note">
+<strong>注意事项：</strong>
+<br>1. SpecialTask（特殊事件任务，MOD=4）已被标记为 Deprecated，代码中保留了接口但实现为空。
+<br>2. task_cron.go 中的定时任务（每日积分转移、每周公会重置）已全部注释停用，公会重置改为在 <code>FetchGuildTasks</code> 中懒检查。
+<br>3. 主线任务的 <code>FirstFlag</code> 用于处理解锁第二章节后首次刷新主线计数的场景。
+</div>
+
+<p style="margin-top: 40px; text-align: center; color: #999; font-size: 13px;">
+    文档生成时间：2026-05-20 | 基于 D:\c_server\majorserver\module\task 源码分析
+</p>
+
+</div>
+</body>
+</html>

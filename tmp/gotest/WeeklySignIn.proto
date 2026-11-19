@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package btpb;
+option go_package="./pb;pb";
+
+
+message WeeklySignInfo{
+  uint64             uid                 =1;
+  int32              FiveConsRewardFlag  =2;    //未领取：0；已领取:1"
+  repeated int64     signData            =3;    //comment:"签到数据，大小为7的数组，记录签到时间戳，未签到为-1"
+}
+
+
+//获取每周签到信息
+//weeklysignin.GetWeeklySignInfo
+// req = TEmpty
+message WeeklySignInfoRsp{
+    WeeklySignInfo  info    =1;
+}
+
+
+//签到
+//weeklysignin.DoSignIn
+//req = TEmpty
+//签到和补签共用此Rsp
+message WeeklySignInRsp{
+  int32 statusCode  =1;     //状态码:……
+  //bool isGetExtraReward =2; //此次签到是否获得/解锁连签奖励；0否1是
+  //int32 consDays =3;        //当前已连续签到的天数
+}
+
+
+//补签
+// weeklysignin.MakeUpSignIn
+message MakeUpSignInReq{
+  uint32 dayId = 1;       //周几：1到7
+}
+
+//领取连签奖励（手动）
+//weeklysignin.GetFiveConsReward
+//req = TEmpty
+//rsp = WeeklySignInRsp

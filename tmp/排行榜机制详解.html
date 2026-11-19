@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>排行榜（Rank）机制详解 · c_server</title>
+<style>
+  :root{
+    --bg:#0e1117; --panel:#161b22; --panel2:#1c2330; --border:#2b3340;
+    --txt:#d6deeb; --muted:#8a97a8; --accent:#4ea1ff; --accent2:#7ee787;
+    --warn:#ffb454; --pink:#ff7b9c; --purple:#bd8cff; --code:#0b0e14;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+    line-height:1.7;font-size:15px}
+  .wrap{display:flex;max-width:1400px;margin:0 auto}
+  /* sidebar */
+  nav{position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto;
+    width:260px;flex:0 0 260px;padding:24px 14px;border-right:1px solid var(--border);
+    background:linear-gradient(180deg,#11161f,#0e1117)}
+  nav h2{font-size:13px;letter-spacing:1px;color:var(--accent);text-transform:uppercase;margin:0 0 12px 6px}
+  nav a{display:block;color:var(--muted);text-decoration:none;font-size:13.5px;
+    padding:6px 10px;border-radius:7px;margin:1px 0;transition:.15s}
+  nav a:hover{color:var(--txt);background:var(--panel2)}
+  nav a.sub{padding-left:22px;font-size:12.8px;color:#6f7c8d}
+  /* main */
+  main{flex:1;padding:40px 50px;min-width:0}
+  header.hero{padding:30px 34px;border-radius:16px;margin-bottom:36px;
+    background:radial-gradient(1200px 300px at 0% 0%,rgba(78,161,255,.18),transparent),
+               linear-gradient(135deg,#18202d,#12161d);
+    border:1px solid var(--border)}
+  header.hero h1{margin:0 0 8px;font-size:30px}
+  header.hero p{margin:4px 0;color:var(--muted)}
+  .tagrow{margin-top:16px;display:flex;gap:8px;flex-wrap:wrap}
+  .tag{font-size:12px;padding:4px 11px;border-radius:20px;border:1px solid var(--border);
+    background:var(--panel2);color:var(--accent)}
+  section{margin-bottom:46px;scroll-margin-top:20px}
+  h2.sec{font-size:23px;margin:0 0 4px;padding-bottom:10px;border-bottom:2px solid var(--border)}
+  h2.sec .n{color:var(--accent);font-weight:700;margin-right:10px}
+  h3{font-size:18px;color:#e8eef6;margin:28px 0 10px}
+  h4{font-size:15.5px;color:var(--accent2);margin:20px 0 8px}
+  p{margin:10px 0}
+  code{font-family:"JetBrains Mono",Consolas,monospace;font-size:13px;
+    background:var(--panel2);padding:1.5px 6px;border-radius:5px;color:var(--pink)}
+  pre{background:var(--code);border:1px solid var(--border);border-radius:12px;
+    padding:16px 18px;overflow-x:auto;margin:14px 0;font-size:12.8px;line-height:1.6}
+  pre code{background:none;padding:0;color:#c9d4e3;font-size:12.8px}
+  .kw{color:var(--purple)} .str{color:var(--accent2)} .cm{color:#5c6b7a;font-style:italic}
+  .fn{color:var(--accent)} .num{color:var(--warn)} .ty{color:#79c0ff}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;
+    padding:18px 22px;margin:14px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  @media(max-width:1000px){.grid2,.grid3{grid-template-columns:1fr}}
+  .note{border-left:4px solid var(--accent);background:rgba(78,161,255,.08);
+    padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0}
+  .warn{border-left:4px solid var(--warn);background:rgba(255,180,84,.08);
+    padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0}
+  .tip{border-left:4px solid var(--accent2);background:rgba(126,231,135,.07);
+    padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.5px}
+  th,td{border:1px solid var(--border);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:var(--accent);font-weight:600}
+  tr:nth-child(even) td{background:rgba(255,255,255,.015)}
+  .pill{display:inline-block;font-size:11.5px;padding:2px 8px;border-radius:6px;
+    background:var(--panel2);border:1px solid var(--border);color:var(--muted);margin:2px}
+  .badge-redis{color:#ff7b9c;border-color:#5a2a36}
+  .badge-mysql{color:#7ee787;border-color:#2f5236}
+  .badge-mem{color:#ffb454;border-color:#5a4422}
+  .path{font-size:12px;color:var(--muted);font-family:monospace;
+    background:var(--panel2);padding:3px 9px;border-radius:6px;display:inline-block;margin:3px 0}
+  /* flow diagram */
+  .flow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:16px 0}
+  .box{background:var(--panel2);border:1px solid var(--border);border-radius:10px;
+    padding:10px 14px;font-size:13px;text-align:center;min-width:90px}
+  .box.acc{border-color:var(--accent);color:var(--accent)}
+  .box.grn{border-color:var(--accent2);color:var(--accent2)}
+  .box.pnk{border-color:var(--pink);color:var(--pink)}
+  .arrow{color:var(--muted);font-size:20px}
+  .bits{display:flex;border-radius:8px;overflow:hidden;border:1px solid var(--border);margin:10px 0;font-size:12px}
+  .bits div{padding:8px 6px;text-align:center}
+  .bits .score{background:rgba(78,161,255,.22);flex:2}
+  .bits .time{background:rgba(255,123,156,.22);flex:1.3}
+  .foot{color:var(--muted);font-size:12.5px;text-align:center;margin-top:50px;
+    padding-top:20px;border-top:1px solid var(--border)}
+  .anchor{color:var(--accent);text-decoration:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav>
+  <h2>目录</h2>
+  <a href="#overview">0 · 总览</a>
+  <a href="#three">1 · 三种榜单实现</a>
+  <a href="#layer" class="sub">分层与接口</a>
+  <a href="#redis">2 · Redis 实时榜</a>
+  <a href="#zset" class="sub">ZSET 存储模型</a>
+  <a href="#rebuild" class="sub">重建 / 过期 / 裁剪</a>
+  <a href="#tie">3 · 同分排序（Tie-break）</a>
+  <a href="#bit" class="sub">方案A：位编码</a>
+  <a href="#timehash" class="sub">方案B：TimeSort+Lua</a>
+  <a href="#offline">4 · 离线榜（核心）</a>
+  <a href="#kafka" class="sub">Kafka binlog 数据流</a>
+  <a href="#schema" class="sub">Schema 配置</a>
+  <a href="#builtin" class="sub">内置榜单清单</a>
+  <a href="#rpc">5 · 对外 RPC 与缓存</a>
+  <a href="#event">6 · 事件驱动更新</a>
+  <a href="#mem">7 · 本地内存简易榜</a>
+  <a href="#keys">8 · Redis Key 一览</a>
+  <a href="#summary">9 · 设计要点总结</a>
+</nav>
+
+<main>
+<header class="hero">
+  <h1>排行榜（Rank / 排行榜）机制详解</h1>
+  <p>基于 <code>c_server</code> 代码库逆向梳理 · 覆盖实时榜、离线榜、内存榜三套实现</p>
+  <p style="font-size:13px">核心模块：<span class="path">majorserver/module/ranklist</span> · <span class="path">serverfw/rank/redisrank</span> · <span class="path">datacenter/offline_rank</span></p>
+  <div class="tagrow">
+    <span class="tag">Redis ZSET</span>
+    <span class="tag">MySQL 离线榜</span>
+    <span class="tag">Kafka binlog</span>
+    <span class="tag">同分时间排序</span>
+    <span class="tag">分布式重建锁</span>
+    <span class="tag">LRU 缓存</span>
+  </div>
+</header>
+
+<!-- ============ 0 总览 ============ -->
+<section id="overview">
+  <h2 class="sec"><span class="n">0</span>总览</h2>
+  <p>这套排行榜系统不是单一实现，而是按「数据规模 / 实时性 / 是否跨进程」划分的<strong>三套并存的机制</strong>。
+  业务方通过 <code>ranklist</code> 模块的接口拿到对应的榜单句柄，而底层落地到 Redis、MySQL 或纯内存。</p>
+
+  <div class="grid3">
+    <div class="card">
+      <h4>① Redis 实时榜 <span class="pill badge-redis">redisrank</span></h4>
+      <p>基于 Redis <code>ZSET</code>，多进程共享、强实时。用于活动榜、竞技场等需要即时写入/查询排名的场景。支持「同分按时间排序」。</p>
+    </div>
+    <div class="card">
+      <h4>② 离线榜 <span class="pill badge-mysql">offline_rank</span></h4>
+      <p>由 <strong>DataCenter</strong> 消费 <strong>Kafka binlog</strong> 自动维护，落地 <code>MySQL</code> 分表。用于战力榜、击杀榜等「玩家数据天然存在、不想业务侧主动写榜」的常驻大榜。</p>
+    </div>
+    <div class="card">
+      <h4>③ 内存简易榜 <span class="pill badge-mem">util.TRank</span></h4>
+      <p>单进程内 <code>slice</code> + 读写锁 + 插入排序。用于临时、单服、量小的榜（如某活动内的伤害进度榜）。</p>
+    </div>
+  </div>
+
+  <div class="note">
+    <strong>一句话区分：</strong>需要业务主动 <code>AddScore/SetScore</code> 且跨进程 → <b>Redis 实时榜</b>；
+    数据本来就写在玩家/军团表里、只想"自动成榜" → <b>离线榜</b>；
+    只在一个进程内、临时用一下 → <b>内存榜</b>。
+  </div>
+</section>
+
+<!-- ============ 1 三种实现 ============ -->
+<section id="three">
+  <h2 class="sec"><span class="n">1</span>三种榜单实现与分层</h2>
+
+  <div id="layer">
+  <h3>1.1 模块分层</h3>
+  <p>对外统一由 <span class="path">majorserver/module/ranklist/iranklist.go</span> 定义接口，实现位于 <code>ranklistimpl/</code>，
+  再向下依赖框架库与 DataCenter。</p>
+
+  <div class="flow">
+    <div class="box acc">业务模块<br><small>活动 / 军团 / 竞技场</small></div>
+    <span class="arrow">→</span>
+    <div class="box">IInRankListModule<br><small>接口层</small></div>
+    <span class="arrow">→</span>
+    <div class="box">ranklistimpl<br><small>实现层</small></div>
+    <span class="arrow">→</span>
+    <div class="box pnk">redisrank<br><small>实时榜</small></div>
+    <div class="box grn">offline_rank<br><small>离线榜</small></div>
+  </div>
+  </div>
+
+  <h3>1.2 接口入口 <code>IInRankListModule</code></h3>
+  <p>业务方通过 <code>ctx.GetInRankListModule()</code> 拿到模块，几个关键工厂方法：</p>
+  <table>
+    <tr><th>方法</th><th>返回</th><th>用途 / 特点</th></tr>
+    <tr><td><code>GetOrRegisterRank(name, maxNum, endTime)</code></td><td>实时榜句柄</td><td>普通 Redis 榜，<b>同分不按时间</b>排序</td></tr>
+    <tr><td><code>GetOrRegisterRankWithParams(..., timeSortLevel, lastRankName)</code></td><td>实时榜句柄</td><td>可指定<b>同分时间排序方式</b>与<b>上期榜名</b>（用于滚动重建）</td></tr>
+    <tr><td><code>GetOrRegActRank(name, maxNum, endTime, lastRankName)</code></td><td>实时榜句柄</td><td>活动榜，<b>自动用位编码</b>把更新时间塞进分数（更新早的靠前）</td></tr>
+    <tr><td><code>GetOfflineRankSingle(rankListType, rankKey, periodKey)</code></td><td>离线榜句柄</td><td>取 DataCenter 维护的离线榜</td></tr>
+    <tr><td><code>RemoveUserFromPermanentRankList(uid)</code></td><td>—</td><td>注销玩家时从所有常驻榜清除</td></tr>
+  </table>
+
+  <div class="tip">
+    <strong>命名隔离：</strong>所有实时榜名最终都会带上服标识——
+    <code>GetRankName(name, id)</code> → <code>fmt.Sprintf("%v_%v_%s", name, id, serverId)</code>，
+    避免多服共用一个 Redis 时 key 冲突。
+  </div>
+</section>
+
+<!-- ============ 2 Redis 实时榜 ============ -->
+<section id="redis">
+  <h2 class="sec"><span class="n">2</span>Redis 实时榜（redisrank.TRank）</h2>
+  <p class="path">serverfw/rank/redisrank/rank.go</p>
+  <p>目标注释写得很直接：<em>"支持多个进程同时访问的排行榜"</em>。每个榜对应一个 Redis ZSET，
+  分数越大排名越靠前（<code>ZRevRange</code>）。</p>
+
+  <div id="zset">
+  <h3>2.1 ZSET 存储模型</h3>
+  <p>榜单对象 <code>TItem</code> 三要素：</p>
+  <pre><code><span class="kw">type</span> <span class="ty">TItem</span> <span class="kw">struct</span> {
+    Id          <span class="ty">string</span>   <span class="cm">// 元素唯一id（uid / gid 字符串化）</span>
+    Score       <span class="ty">float64</span>  <span class="cm">// 得分，越大排名越靠前</span>
+    TimeStampMs <span class="ty">int64</span>    <span class="cm">// 得分对应时间戳，仅开启时间排序时有效</span>
+}</code></pre>
+
+  <p>读写直接映射到 Redis 命令：</p>
+  <table>
+    <tr><th>业务操作</th><th>底层 Redis 命令</th></tr>
+    <tr><td>写入 / 更新 <code>SetItem</code></td><td><code>ZADD</code>（无时间排序）或 Lua 脚本（有时间排序）</td></tr>
+    <tr><td>取 TopN <code>GetList(offset,limit)</code></td><td><code>ZREVRANGE ... WITHSCORES</code></td></tr>
+    <tr><td>按分数区间 <code>GetListByScoreRange</code></td><td><code>ZREVRANGEBYSCORE / ZRANGEBYSCORE</code></td></tr>
+    <tr><td>查排名 <code>GetRankById</code></td><td><code>ZREVRANK</code>（+1，因 Redis 从 0 计）</td></tr>
+    <tr><td>查分数 <code>GetItemById</code></td><td><code>ZSCORE</code></td></tr>
+    <tr><td>批量查 <code>GetItemsByIds</code></td><td><code>Pipeline</code> 批量 <code>ZSCORE</code></td></tr>
+    <tr><td>删除 <code>DelById</code></td><td><code>ZREM</code></td></tr>
+    <tr><td>长度 <code>GetCurrLen</code></td><td><code>ZCARD</code></td></tr>
+  </table>
+  </div>
+
+  <div id="rebuild">
+  <h3>2.2 重建（Rebuild）、过期、裁剪</h3>
+
+  <h4>① 懒重建 + 分布式锁</h4>
+  <p>榜首次访问或收到重建标志时触发 <code>doRebuild()</code>。多进程并发由 Redis 锁
+  <code>TryLock(rebuild_lock, 30s)</code> 串行化，重建在临时 ZSET 上完成后 <code>RENAME</code> 原子切换，避免读到半成品。</p>
+  <pre><code><span class="cm">// 整体重建流程（节选）</span>
+this.delKey(getRebuildZSetKey(name))           <span class="cm">// 删临时key</span>
+<span class="kw">for</span> i := <span class="num">0</span>; i &lt; len(allItem); i += ZADD_BATCH_COUNT {  <span class="cm">// 每批200条</span>
+    this.redisCli.<span class="fn">ZAdd</span>(getRebuildZSetKey(name), zArr...)
+}
+this.<span class="fn">renameKey</span>(getRebuildZSetKey(name), getZSetKey(name))  <span class="cm">// 原子切换</span></code></pre>
+
+  <h4>② 滚动榜：从上期榜拷贝</h4>
+  <p>周期性榜（如竞技场每日榜）首次重建时，若配置了 <code>lastRankName</code>，会用
+  <code>copyRank.lua</code> 直接从上期 ZSET 拷贝作为初始排名——"今天的榜以昨天为基础"。</p>
+
+  <h4>③ 过期处理</h4>
+  <p>后台 <code>routineRun()</code> 每分钟检查：超过 <code>GetExpirtTime()</code> 的榜不直接删，而是
+  <code>RENAME</code> 到 backup key 并设 30 天 TTL（可回溯）。注册时过期时间 =
+  <code>endTime + DefaultExpireHours(14天)</code>。</p>
+
+  <h4>④ 长度裁剪</h4>
+  <p>有上限的榜，仅当元素数 &gt; <code>maxLen × 1.2</code>（<code>CHECK_LEN_COEF</code>）才触发
+  <code>ZRemRangeByRank</code> 删掉低分尾部——避免每次写入都裁剪，降低开销。</p>
+  </div>
+</section>
+
+<!-- ============ 3 同分排序 ============ -->
+<section id="tie">
+  <h2 class="sec"><span class="n">3</span>同分排序（Tie-break）——本系统的精华</h2>
+  <p>Redis ZSET 同分时按 member 字典序排，这不符合游戏需求（通常希望"先达到该分数的玩家排前面"）。
+  本系统提供了<strong>两套互补方案</strong>。</p>
+
+  <div id="bit">
+  <h3>3.1 方案 A：分数-时间位编码（在 TRankListSingle 层）</h3>
+  <p class="path">majorserver/module/ranklist/ranklistimpl/ranklist_single_obj.go</p>
+  <p>把"真实分数"和"时间偏移"<b>打包进同一个 64 位浮点分数</b>，让 ZSET 一次比较即完成"先比分、再比时间"。
+  定义了两种位宽布局：</p>
+
+  <h4>活动榜布局 LittleTimeInScore（分数大、时间窗口小）</h4>
+  <div class="bits">
+    <div class="score">Score · 高 32 位<br><small>积分上限 ≈ 42.9 亿</small></div>
+    <div class="time">Time · 低 21 位<br><small>时间窗 ≈ 24.27 天</small></div>
+  </div>
+
+  <h4>常驻榜布局 BigTimeInScore（分数小、时间窗口大）</h4>
+  <div class="bits">
+    <div class="score">Score · 高 21 位<br><small>积分上限 ≈ 209 万</small></div>
+    <div class="time">Time · 低 32 位<br><small>时间窗到 2050 年</small></div>
+  </div>
+
+  <p>编码核心 <code>getValFromScoreTime</code>：把分数左移到高位，再加上"时间偏移"。
+  关键技巧是存 <strong>timeOffset = endTime − updateTime</strong>（剩余时间），
+  这样<b>更新越早 → 剩余越大 → 低位越大 → 同分时排名越靠前</b>。</p>
+  <pre><code>timeOffset := endTime - updateTime        <span class="cm">// 越早更新，offset 越大</span>
+rScore := aScore &lt;&lt; TimeBitLength          <span class="cm">// 分数占高位</span>
+rScore += uint64(timeOffset)               <span class="cm">// 时间占低位</span>
+<span class="cm">// 读取时再 getScoreTimeFromVal 用掩码 &amp; 位移还原真实分数与时间</span></code></pre>
+  <div class="warn">
+    <strong>取舍：</strong>位编码零额外存储、单次 ZADD 即可，但<b>积分/时间范围受位宽限制</b>，
+    超限会被截断（代码里有 Warning + clamp）。活动榜因此被限定"时长 ≤ 24.27 天、积分 ≤ 42.9 亿"。
+  </div>
+  </div>
+
+  <div id="timehash">
+  <h3>3.2 方案 B：TimeSortLevel + 独立 timeHash + Lua（在框架层）</h3>
+  <p>当不想牺牲分数精度时，框架层提供另一种：分数照常存，<b>时间戳单独存一个 Hash</b>，
+  并把时间编进 ZSET 的 member 里参与字典序。三档：</p>
+  <table>
+    <tr><th>TimeSortLevel</th><th>含义</th></tr>
+    <tr><td><code>TimeSortNone(0)</code></td><td>不开启，同分按默认</td></tr>
+    <tr><td><code>TimeSortReverseWithScore(1)</code></td><td>同分时，时间小的靠前（member 存 <code>maxTs − ts</code>）</td></tr>
+    <tr><td><code>TimeSortSameWithScore(2)</code></td><td>同分时，时间大的靠前（member 存 <code>ts</code>）</td></tr>
+  </table>
+  <p>因为要同时改 ZSET 与 timeHash，写/查/删都用 <strong>Lua 脚本保证原子性</strong>
+  （<code>updateById.lua / getRankById.lua / delById.lua / clear.lua</code>）。例如更新：</p>
+  <pre><code><span class="cm">-- updateById.lua（节选）：先按旧时间戳删旧 member，再写新 member</span>
+<span class="kw">local</span> oldTs = redis.<span class="fn">call</span>(<span class="str">'HGET'</span>, timeHashKey, id)
+<span class="kw">if</span> oldTs <span class="kw">then</span>
+    <span class="kw">local</span> oldZSetId = tostring(maxTs - tonumber(oldTs)) .. sep .. id
+    redis.<span class="fn">call</span>(<span class="str">'ZREM'</span>, rankZSetKey, oldZSetId)
+<span class="kw">end</span>
+redis.<span class="fn">call</span>(<span class="str">'HSET'</span>, timeHashKey, id, newTs)             <span class="cm">-- 更新时间戳</span>
+<span class="kw">local</span> newZSetId = tostring(maxTs - tonumber(newTs)) .. sep .. id
+<span class="kw">return</span> redis.<span class="fn">call</span>(<span class="str">'ZADD'</span>, rankZSetKey, tonumber(newScore), newZSetId)</code></pre>
+  </div>
+
+  <div class="note">两种方案对应不同诉求：<b>方案 A</b>省存储但限范围、适合活动榜；<b>方案 B</b>不限分数范围但多一份 timeHash + Lua 开销、适合常驻精确榜。</div>
+</section>
+
+<!-- ============ 4 离线榜 ============ -->
+<section id="offline">
+  <h2 class="sec"><span class="n">4</span>离线榜（offline_rank）——玩家/军团常驻大榜</h2>
+  <p class="path">datacenter/offline_rank/rank_manager.go · builtin_rank.go</p>
+  <p>这是日常"战力榜 / 击杀榜 / 主城等级榜 / 军团榜"等的实现。最大特点：
+  <strong>业务侧完全不主动写榜</strong>，而是 DataCenter 监听数据库变更自动成榜。</p>
+
+  <div id="kafka">
+  <h3>4.1 数据流：DB 改动 → Kafka → 自动入榜</h3>
+  <div class="flow">
+    <div class="box">玩家/军团表<br><small>t_user / t_guild_stat…</small></div>
+    <span class="arrow">→</span>
+    <div class="box pnk">Kafka binlog<br><small>字段变更消息</small></div>
+    <span class="arrow">→</span>
+    <div class="box acc">RankManager<br><small>UpdateByKafka</small></div>
+    <span class="arrow">→</span>
+    <div class="box">Schema 匹配<br><small>srcKey→schemas</small></div>
+    <span class="arrow">→</span>
+    <div class="box grn">MySQL 榜单分表<br><small>t_rank_list_*</small></div>
+  </div>
+  <p>处理逻辑（<code>UpdateByKafka</code>）：</p>
+  <ol>
+    <li>解析消息所属表，识别是<b>玩家表(uid)</b>还是<b>军团表(gid)</b>；</li>
+    <li>玩家：反查其所属 <code>gid</code> 与 <code>botType</code>——<strong>机器人玩家直接不入榜</strong>；</li>
+    <li>遍历变更字段，用 <code>{Column, TableName, DbType}</code> 组成 <code>srcKey</code> 找关联的榜单 schema；无关联则跳过；</li>
+    <li>命中则把该字段新值 <code>UPSERT</code> 到对应的榜单分表行。</li>
+  </ol>
+  <div class="tip">退团回调 <code>OnUserQuitGuild</code> 会自动把该玩家从所有"军团范围"的榜单表删除，保证军团内榜的正确性。</div>
+  </div>
+
+  <div id="schema">
+  <h3>4.2 榜单定义 <code>TRankSchema</code></h3>
+  <p>每个离线榜由一份 schema 描述，配置驱动、可同步到 DB：</p>
+  <table>
+    <tr><th>字段</th><th>说明</th></tr>
+    <tr><td><code>ItemType</code></td><td>榜元素类型：<code>User</code> / <code>Guild</code></td></tr>
+    <tr><td><code>RangeType</code></td><td>范围：单服 / 单军团 / 多军团（决定分表 key）</td></tr>
+    <tr><td><code>PeriodType</code></td><td>周期：None / Day / Week（决定是否带 periodKey、是否定期清理）</td></tr>
+    <tr><td><code>SortFields</code></td><td><strong>多字段排序</strong>，依次比较。如战力榜：先 <code>cur_fight_force DESC</code>，再 <code>cur_fight_force_change_time ASC</code>（同战力先达到者靠前）</td></tr>
+    <tr><td><code>NeedUpdateTimestamp</code></td><td>是否记录更新时间戳，用于"只统计满足时间条件的元素"过滤</td></tr>
+    <tr><td><code>MaxNum / ExpireTimeUnix</code></td><td>榜容量上限 / 过期时间（0 表示不限 / 永久）</td></tr>
+  </table>
+
+  <h4>分表策略</h4>
+  <p>榜单表名 = <code>前缀 + _rankKey [+ _periodKey]</code>。例如军团每周贡献榜：
+  <code>t_rank_list_user_weekly_donate_in_guild_{gid}_{20250707}</code>。
+  <code>rankKey</code> 通常是 sid 或 gid，<code>periodKey</code> 是日期。周期表由 cron
+  <code>purge_expired_rank_list</code>（每小时）自动 drop 过期表。</p>
+  </div>
+
+  <div id="builtin">
+  <h3>4.3 内置榜单清单（builtin_rank.go）</h3>
+  <div class="grid2">
+    <div class="card">
+      <h4>玩家榜（服内）</h4>
+      <span class="pill">战力 user_ff</span><span class="pill">主城等级 user_city</span>
+      <span class="pill">击杀 user_kill</span><span class="pill">关卡 user_pass</span>
+      <span class="pill">最高英雄战力 user_max_hero_ff</span><span class="pill">总英雄战力 user_sum_hero_ff</span>
+      <span class="pill">坦克/飞机/导弹战场 exp</span>
+      <span class="pill">12 类战力小项 user_detail_ff_*</span>
+    </div>
+    <div class="card">
+      <h4>军团榜 / 军团内榜</h4>
+      <span class="pill">军团战力 guild_ff</span><span class="pill">军团击杀 guild_kill</span>
+      <span class="pill">团内战力 user_ff_in_guild</span><span class="pill">团内击杀 user_kill_in_guild</span>
+      <span class="pill">团内每日贡献(Day)</span><span class="pill">团内每周贡献(Week)</span>
+    </div>
+  </div>
+  </div>
+</section>
+
+<!-- ============ 5 RPC 与缓存 ============ -->
+<section id="rpc">
+  <h2 class="sec"><span class="n">5</span>对外 RPC 与缓存层</h2>
+  <p class="path">ranklistimpl/ranklist_rpc.go · ranklist_logic.go · ranklist_local_cache.go</p>
+
+  <h3>5.1 客户端入口</h3>
+  <table>
+    <tr><th>RPC</th><th>作用</th></tr>
+    <tr><td><code>RpcGetRankListTotalInfo</code></td><td>排行榜总览：每个榜取 Top1 拼成一屏概览</td></tr>
+    <tr><td><code>RpcGetRankListInfo</code></td><td>单个榜详情：TopN + 自己的排名/分数</td></tr>
+    <tr><td colspan="2"><code>...ByInner</code> 版本：跨服查询时，本服 RPC 调用目标服的 Inner 接口</td></tr>
+  </table>
+  <p>权限由 <code>GameCondition</code> 控制；"自己"的那条若不在 TopN 内，则现场用
+  <code>getSelfRankScoreByRankListType</code> 实时取值补构造一条。</p>
+
+  <h3>5.2 进程内 LRU 缓存</h3>
+  <p>离线榜每次查 DataCenter 成本较高，于是 <code>ranklist_local_cache.go</code> 加了一层
+  <code>gcache</code> LRU：</p>
+  <ul>
+    <li>容量 <code>1000</code>，过期 <code>1 小时</code>；key = <code>{rankListType, rankKey, periodKey}</code>；</li>
+    <li>miss 时由 <code>rankListTopMemberInfoLoader</code> 拉离线榜 Top（战力榜 200、军团榜 50、其余 100）并填充玩家/军团展示信息；</li>
+    <li>提供 HTTP 命令 <code>clearRankCache</code> 与 <code>removeRankCache</code> 手动失效；</li>
+    <li>后台每 10s 打印命中率统计。</li>
+  </ul>
+  <div class="warn">因此玩家看到的离线榜<strong>有最长 1 小时延迟</strong>（缓存窗口），这是用一致性换性能的典型取舍。</div>
+</section>
+
+<!-- ============ 6 事件驱动 ============ -->
+<section id="event">
+  <h2 class="sec"><span class="n">6</span>事件驱动的榜数据刷新</h2>
+  <p class="path">ranklistimpl/ranklist_update_logic.go</p>
+  <p>离线榜靠 binlog，但有些"聚合值"（如军团总战力 = 成员战力之和）并不直接存在某个字段里，
+  需要业务在相关事件发生时<strong>先把聚合值写回 DB 字段</strong>，binlog 再驱动入榜。</p>
+  <pre><code><span class="cm">// 事件 → 需要刷新的榜类型</span>
+<span class="kw">var</span> RankListEvent = <span class="kw">map</span>[<span class="ty">int32</span>][]pb.RankListType{
+    event.EventHeroUpgrade:   {pb.RankListType_GuildPower},   <span class="cm">// 英雄升级→军团战力</span>
+    event.EventGuildJoin:     {pb.RankListType_GuildPower, pb.RankListType_GuildKill},
+    event.EventGuildQuit:     {pb.RankListType_GuildPower, pb.RankListType_GuildKill},
+    <span class="cm">// ...建筑、科研、军团增减员等</span>
+}</code></pre>
+  <p>例如玩家退团 (<code>EventGuildQuit</code>)：异步在事务里把该玩家的战力/击杀从军团聚合值中扣减，
+  写入 <code>t_guild_stat</code>，随后 binlog 自动更新军团榜。整个过程加 <code>LockGuildData</code> 防并发。</p>
+</section>
+
+<!-- ============ 7 内存榜 ============ -->
+<section id="mem">
+  <h2 class="sec"><span class="n">7</span>本地内存简易榜（util.TRank）</h2>
+  <p class="path">majorserver/util/rank_simple.go</p>
+  <p>最轻量的实现：一个带 <code>sync.RWMutex</code> 的 <code>[]*TRankItem</code> 切片，
+  每次 <code>ProgressAdd/Set</code> 后做<strong>局部递归冒泡</strong>把变动项移到正确位置（接近 O(n) 但单次移动很短）。</p>
+  <ul>
+    <li>同分 tie-break：<code>compareThan</code> 内置——升序榜同分时 <b>ChangeTime 小的靠前</b>；</li>
+    <li><code>removeZero</code> 选项可在进度归零时自动出榜；</li>
+    <li>仅单进程有效、重启即失，适合活动期间的临时榜。</li>
+  </ul>
+</section>
+
+<!-- ============ 8 Keys ============ -->
+<section id="keys">
+  <h2 class="sec"><span class="n">8</span>Redis Key 命名一览</h2>
+  <p>所有 key 带 <code>{__ranker}</code> hash-tag，保证 Redis Cluster 下同一榜的多个 key 落同一 slot。</p>
+  <table>
+    <tr><th>用途</th><th>Key 格式</th></tr>
+    <tr><td>榜单 ZSET</td><td><code>{__ranker}_zset_&lt;name&gt;</code></td></tr>
+    <tr><td>时间 Hash（时间排序用）</td><td><code>{__ranker}_time_hash_&lt;name&gt;</code></td></tr>
+    <tr><td>重建临时</td><td><code>..._zset_&lt;name&gt;_for_rebuild</code></td></tr>
+    <tr><td>过期备份</td><td><code>..._zset_&lt;name&gt;_for_backup</code>（TTL 30天）</td></tr>
+    <tr><td>重建标志 / 时间 / 锁</td><td><code>{__ranker}_rebuild_flag/time/lock_&lt;name&gt;</code></td></tr>
+  </table>
+  <p>其中 <code>&lt;name&gt;</code> = 业务名 + id + serverId（见 <code>GetRankName</code>）。</p>
+</section>
+
+<!-- ============ 9 总结 ============ -->
+<section id="summary">
+  <h2 class="sec"><span class="n">9</span>设计要点总结</h2>
+  <div class="grid2">
+    <div class="card"><h4>① 多实现按场景分流</h4><p>实时榜(Redis)/离线榜(MySQL+Kafka)/内存榜三套并存，业务按"实时性·规模·跨进程"选型，统一接口收口。</p></div>
+    <div class="card"><h4>② 同分排序双方案</h4><p>位编码（省存储、限范围、活动榜）与 timeHash+Lua（不限范围、精确、常驻榜）互补。</p></div>
+    <div class="card"><h4>③ 离线榜零侵入成榜</h4><p>消费 binlog 自动维护，业务不写榜；聚合类指标用事件回写 DB 字段间接驱动。</p></div>
+    <div class="card"><h4>④ 一致性换性能</h4><p>LRU 缓存 1h、长度超 1.2 倍才裁剪、批量 ZADD/Pipeline，均为吞吐优化。</p></div>
+    <div class="card"><h4>⑤ 分布式安全</h4><p>重建用 Redis 锁 + 临时 key RENAME 原子切换；多 key 操作用 Lua 原子化。</p></div>
+    <div class="card"><h4>⑥ 数据治理</h4><p>机器人不入榜、退团清榜、周期表 cron 清理、过期榜备份 30 天可回溯。</p></div>
+  </div>
+
+  <div class="note" style="margin-top:24px">
+    <strong>典型调用链回顾：</strong><br>
+    玩家升级英雄 → 战力字段变更写 DB → Kafka binlog → DataCenter 入 <code>user_ff</code> 榜（MySQL）→
+    客户端拉榜命中 LRU 缓存（≤1h）→ 缓存 miss 时回源 DataCenter Top200 → 拼装玩家展示信息返回。
+  </div>
+</section>
+
+<div class="foot">
+  本文档由对 <code>c_server</code> 源码静态分析整理 · 仅作机制说明，未改动任何业务代码<br>
+  涉及文件：ranklist 模块全量 · serverfw/rank/redisrank · datacenter/offline_rank
+</div>
+</main>
+</div>
+</body>
+</html>

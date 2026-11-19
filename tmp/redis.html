@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>项目中 Redis 与 Etcd 使用总结</title>
+<style>
+  body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; line-height: 1.7; color: #333; max-width: 960px; margin: 40px auto; padding: 0 20px; }
+  h1 { border-bottom: 2px solid #ccc; padding-bottom: 10px; }
+  h2 { margin-top: 35px; border-bottom: 1px solid #ddd; padding-bottom: 6px; }
+  h3 { margin-top: 25px; color: #444; }
+  table { border-collapse: collapse; width: 100%; margin: 15px 0; }
+  th, td { border: 1px solid #bbb; padding: 8px 12px; text-align: left; }
+  th { background: #f0f0f0; }
+  code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: Consolas, monospace; font-size: 0.95em; }
+  pre { background: #f8f8f8; padding: 12px; border-left: 3px solid #999; overflow-x: auto; }
+  ul { margin: 8px 0; }
+  .section { margin-bottom: 40px; }
+</style>
+</head>
+<body>
+
+<h1>项目中 Redis 与 Etcd 使用总结</h1>
+
+<div class="section">
+<h2>一、Redis 使用总结</h2>
+
+<h3>1. 使用目的</h3>
+<ul>
+  <li><strong>缓存服务器开服时间</strong>：如 <code>_server_open_time_&lt;serverId&gt;</code>，供各服务读取开服时间计算活动周期。</li>
+  <li><strong>跨服聊天消息缓存</strong>：存储跨服频道的聊天记录，实现多服共享聊天数据。</li>
+  <li><strong>敏感词存储</strong>：全局敏感词列表统一存于 Redis，各服务启动时加载。</li>
+  <li><strong>分布式锁</strong>：分组、竞态场景中通过 Redis 锁保证并发安全。</li>
+  <li><strong>分组数据</strong>：跨服分组系统使用 Redis 做数据持久化和锁竞争。</li>
+</ul>
+
+<h3>2. 依赖框架</h3>
+<table>
+  <tr><th>框架/库</th><th>说明</th><th>使用位置</th></tr>
+  <tr>
+    <td><code>gitlab.babeltime.com/serverfw/rediswrapper</code></td>
+    <td>公司内部封装的 Redis 客户端，提供连接池、Get/Set、TryLock/Unlock 等 API</td>
+    <td>common/redis, common/mask_words, common/module/chat_base, crossserver/module/armsrace 等</td>
+  </tr>
+  <tr>
+    <td><code>github.com/redis/go-redis/v9</code></td>
+    <td>官方 Go Redis 客户端，直接使用 <code>redis.NewClient</code></td>
+    <td>imserver/module/public/rediscache</td>
+  </tr>
+</table>
+
+<h3>3. 连接获取方式</h3>
+<p>Redis 的连接地址不硬编码，统一从 <strong>Etcd</strong> 中读取：</p>
+<pre>
+// 1. 构造 Redis 在 etcd 中的名字
+redisName := util.GetRedisNameByDomain(domain)   // 返回 "domain_&lt;domain&gt;"
+
+// 2. 从 etcd 读取 Redis URL
+redisUrl, err := util.GetRedisUrlFromEtcdWithEnv(gameName, redisName)
+
+// 3. 初始化 Redis 客户端（方式一：公司封装）
+redisWrapper, err := rediswrapper.NewRedisWrapper(redisUrl)
+// 或复用全局实例
+redisWrapper, err := rediswrapper.GetOrInitGlobalRedisWrapper(redisUrl)
+
+// 4. 初始化 Redis 客户端（方式二：官方库，imserver 中使用）
+opt, _ := redis.ParseURL(redisUrl)
+rdb := redis.NewClient(opt)
+</pre>
+
+<h3>4. 核心使用方法</h3>
+<table>
+  <tr><th>操作</th><th>示例代码</th><th>说明</th></tr>
+  <tr>
+    <td>Get</td>
+    <td><code>val, exist, err := redisWrapper.Get(key)</code></td>
+    <td>读取字符串值，exist 表示 key 是否存在</td>
+  </tr>
+  <tr>
+    <td>Set</td>
+    <td><code>err := redisWrapper.Set(key, value, 0)</code></td>
+    <td>写入字符串值，第三个参数为过期时间（0 表示永不过期）</td>
+  </tr>
+  <tr>
+    <td>TryLock</td>
+    <td><code>isLock, err := redisWrapper.TryLock(lockKey, timeout)</code></td>
+    <td>尝试获取分布式锁，返回是否加锁成功</td>
+  </tr>
+  <tr>
+    <td>Unlock</td>
+    <td><code>err := redisWrapper.Unlock(lockKey)</code></td>
+    <td>释放分布式锁</td>
+  </tr>
+</table>
+
+<h3>5. 典型使用场景示例</h3>
+<p><strong>跨服聊天缓存</strong>（<code>common/module/chat_base/chat_cross_redis.go</code>）：</p>
+<pre>
+// 将聊天消息 JSON 序列化后写入 Redis
+data, _ := json.Marshal(chatMsgCache)
+redisHandler.Set(redisKey, data, 0)
+
+// 从 Redis 读取并反序列化
+cacheStr, exist, err := redisHandler.Get(redisKey)
+json.Unmarshal([]byte(cacheStr), &chatMsgCache)
+</pre>
+
+<p><strong>分布式锁在分组中的使用</strong>（<code>crossserver/module/group/groupimpl/group_logic.go</code>）：</p>
+<pre>
+err := grouping.DoTeamGrouping(...)
+if errors.Is(err, rediswrapper.ErrAlreadyOwned) {
+    // 未拿到锁，等待重试
+    time.Sleep(...)
+}
+</pre>
+</div>
+
+<div class="section">
+<h2>二、Etcd 使用总结</h2>
+
+<h3>1. 使用目的</h3>
+<ul>
+  <li><strong>配置中心</strong>：集中存储游戏全局动态配置（版本号、防火墙开关、封号规则、活动开关等），支持热更新。</li>
+  <li><strong>服务配置发现</strong>：Redis、MySQL 等中间件的连接地址统一注册到 Etcd，服务启动时动态拉取。</li>
+  <li><strong>配置监听（Watch）</strong>：监听指定 key 的变化，实现配置变更的实时生效，无需重启服务。</li>
+</ul>
+
+<h3>2. 依赖框架</h3>
+<table>
+  <tr><th>框架/库</th><th>说明</th><th>使用位置</th></tr>
+  <tr>
+    <td><code>gitlab.babeltime.com/serverfw/etcdwrapper</code></td>
+    <td>底层 Etcd 封装，提供 Init / GetEtcdClient / Get / Set / Watch 等基础 API</td>
+    <td>common/util, common/mask_words, 各 server 启动入口</td>
+  </tr>
+  <tr>
+    <td><code>gitlab.babeltime.com/serverfw/etcdwrapper/etcdutil</code></td>
+    <td>高级封装 <code>TGlobalSettingsBase</code>，提供批量初始化、全量监听、回调更新等能力</td>
+    <td>common/globalsettings</td>
+  </tr>
+</table>
+
+<h3>3. 初始化与连接</h3>
+<pre>
+// 在各服务启动入口（如 majorserver/bin/majorserver.go, imserver/bin/imcore.go 等）
+err := etcdwrapper.Init(config.EtcdEndPoints, config.GN)
+// EtcdEndPoints 示例：[]string{"192.168.x.x:2379", ...}
+// GN 为游戏项目名，如 "cs3"
+</pre>
+
+<h3>4. 核心使用方法</h3>
+<table>
+  <tr><th>操作</th><th>API</th><th>说明</th></tr>
+  <tr>
+    <td>获取客户端</td>
+    <td><code>cli, err := etcdwrapper.GetEtcdClient()</code></td>
+    <td>获取全局 Etcd 客户端实例</td>
+  </tr>
+  <tr>
+    <td>读取 Key</td>
+    <td><code>kvs, err := cli.Get(path)</code></td>
+    <td>返回 key-value 列表</td>
+  </tr>
+  <tr>
+    <td>写入 Key</td>
+    <td><code>cli.Set(path, value)</code>（封装内）</td>
+    <td>向 Etcd 写入配置值</td>
+  </tr>
+  <tr>
+    <td>监听变化</td>
+    <td><code>watchChan := cli.Watch(key)</code></td>
+    <td>阻塞监听 key 的 Create / Modify / Delete 事件</td>
+  </tr>
+  <tr>
+    <td>批量监听配置</td>
+    <td><code>globalSettingsBase.InitAndWatch(gn, domain, handler)</code></td>
+    <td>初始化并监听 <code>&lt;gn&gt;/&lt;domain&gt;/settings/</code> 下所有配置</td>
+  </tr>
+</table>
+
+<h3>5. Etcd 路径约定</h3>
+<table>
+  <tr><th>用途</th><th>路径格式</th><th>示例</th></tr>
+  <tr>
+    <td>Redis 地址配置</td>
+    <td><code>&lt;gn&gt;/redis/&lt;redisName&gt;</code></td>
+    <td><code>cs3/redis/domain_mhf</code></td>
+  </tr>
+  <tr>
+    <td>DB 地址配置</td>
+    <td><code>&lt;gn&gt;/db/&lt;dbName&gt;</code></td>
+    <td><code>cs3/db/cs3_majorserver_s1</code></td>
+  </tr>
+  <tr>
+    <td>全局状态配置</td>
+    <td><code>&lt;gn&gt;/&lt;domain&gt;/settings/status/...</code></td>
+    <td><code>.../status/version_update_time</code></td>
+  </tr>
+  <tr>
+    <td>全局控制配置</td>
+    <td><code>&lt;gn&gt;/&lt;domain&gt;/settings/control/...</code></td>
+    <td><code>.../control/firewall_is_on</code></td>
+  </tr>
+</table>
+
+<h3>6. 典型使用场景示例</h3>
+<p><strong>从 Etcd 读取 Redis 地址</strong>（<code>common/util/etcd_client_util.go</code>）：</p>
+<pre>
+func getValueFromEtcd(aPath string) (string, error) {
+    etcdcli, err := etcdwrapper.GetEtcdClient()
+    kvs, err := etcdcli.Get(aPath)
+    if len(kvs) > 0 {
+        return string(kvs[0].Value), nil
+    }
+    return "", fmt.Errorf("not found path:%s", aPath)
+}
+</pre>
+
+<p><strong>敏感词更新监听</strong>（<code>common/mask_words/mask_words_mgr.go</code>）：</p>
+<pre>
+func watchMaskWordsUpdateTime() {
+    watchChan := gMgr.etcdClient.Watch(gMgr.etcdKey)
+    for info := range watchChan {
+        for _, event := range info.Events {
+            if event.IsCreate() || event.IsModify() {
+                // 配置变更，重新从 Redis 加载敏感词
+                handlerMaskWordsUpdate(string(event.Kv.Key), string(event.Kv.Value))
+            }
+        }
+    }
+}
+</pre>
+
+<p><strong>全局配置热更新</strong>（<code>common/globalsettings/globalsettings.go</code>）：</p>
+<pre>
+// 初始化并监听所有 settings 节点
+globalSettings.GetGlobalSettings().InitAndWatch(config.GN, config.Domain)
+
+// 内部通过 etcdutil.TGlobalSettingsBase 监听 /settings/ 前缀
+// 当任意配置变更时，回调 SetKeyValue(aKey, aValue) 更新内存
+</pre>
+</div>
+
+<div class="section">
+<h2>三、架构关系简图</h2>
+<pre>
+┌─────────────────────────────────────────────────────────┐
+│                      各游戏服务进程                        │
+│  (majorserver / crossserver / imserver / battleserver)  │
+├─────────────────────────────────────────────────────────┤
+│  globalsettings  │  mask_words  │  chat_base  │  group │
+│   InitAndWatch   │   Watch      │  Get/Set    │ TryLock│
+├─────────────────────────────────────────────────────────┤
+│              etcdwrapper / etcdutil (Etcd 封装层)         │
+│                    etcdwrapper.Init()                     │
+├─────────────────────────────────────────────────────────┤
+│                        Etcd 集群                          │
+│  /cs3/redis/domain_mhf                                  │
+│  /cs3/db/cs3_majorserver_s1                               │
+│  /cs3/mhf/settings/status/version_update_time            │
+│  /cs3/mhf/settings/control/firewall_is_on                │
+└─────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                    ┌─────────────────┐
+                    │   Redis 集群     │
+                    │ (缓存、锁、配置)  │
+                    └─────────────────┘
+</pre>
+</div>
+
+<div class="section">
+<h2>四、总结</h2>
+<ul>
+  <li><strong>Etcd</strong> 在本项目中承担<strong>配置中心</strong>与<strong>服务注册发现</strong>的角色，所有服务的 Redis、DB 地址以及大量运行时开关都存放于此；通过 <code>Watch</code> 机制实现配置热更新。</li>
+  <li><strong>Redis</strong> 主要作为<strong>高速缓存</strong>和<strong>分布式锁</strong>的载体，支撑跨服聊天、敏感词、开服时间、分组竞争等场景。</li>
+  <li>两者通过 <code>GetRedisUrlFromEtcdWithEnv</code> 串联：服务启动时先从 Etcd 拿到 Redis 地址，再初始化 Redis 客户端。</li>
+</ul>
+</div>
+
+</body>
+</html>

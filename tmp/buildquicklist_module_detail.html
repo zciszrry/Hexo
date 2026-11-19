@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>major.buildquicklist 模块详解</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-light: #dbeafe;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --border: #e2e8f0;
+            --text: #1e293b;
+            --text-secondary: #64748b;
+            --code-bg: #1e293b;
+            --code-text: #e2e8f0;
+            --success: #16a34a;
+            --warning: #d97706;
+            --info: #0891b2;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.7;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 50px;
+            padding: 40px;
+            background: linear-gradient(135deg, #1e40af, #3b82f6);
+            border-radius: 16px;
+            color: white;
+        }
+
+        header h1 {
+            font-size: 2.2em;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+
+        header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .section {
+            background: var(--card);
+            border-radius: 12px;
+            padding: 32px;
+            margin-bottom: 24px;
+            border: 1px solid var(--border);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        }
+
+        .section h2 {
+            font-size: 1.5em;
+            color: var(--primary);
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid var(--primary-light);
+        }
+
+        .section h3 {
+            font-size: 1.2em;
+            color: var(--text);
+            margin: 20px 0 12px 0;
+        }
+
+        .section p {
+            margin-bottom: 12px;
+            color: var(--text-secondary);
+        }
+
+        .file-tree {
+            background: var(--code-bg);
+            color: var(--code-text);
+            padding: 20px 24px;
+            border-radius: 8px;
+            font-family: 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+            font-size: 0.9em;
+            line-height: 1.8;
+            overflow-x: auto;
+        }
+
+        .file-tree .folder { color: #60a5fa; }
+        .file-tree .file { color: #a5b4fc; }
+        .file-tree .auto { color: #94a3b8; }
+        .file-tree .comment { color: #6b7280; font-style: italic; }
+
+        pre {
+            background: var(--code-bg);
+            color: var(--code-text);
+            padding: 20px 24px;
+            border-radius: 8px;
+            font-family: 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+            font-size: 0.85em;
+            line-height: 1.6;
+            overflow-x: auto;
+            margin: 12px 0;
+        }
+
+        code {
+            background: #f1f5f9;
+            color: #be185d;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+            font-size: 0.9em;
+        }
+
+        pre code {
+            background: none;
+            color: inherit;
+            padding: 0;
+        }
+
+        .keyword { color: #c084fc; }
+        .type { color: #34d399; }
+        .func { color: #fbbf24; }
+        .string { color: #fb923c; }
+        .comment-code { color: #6b7280; }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0;
+            font-size: 0.92em;
+        }
+
+        th, td {
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            background: var(--primary-light);
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        tr:hover td {
+            background: #f8fafc;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 0.8em;
+            font-weight: 500;
+        }
+
+        .badge-interface { background: #dbeafe; color: #1d4ed8; }
+        .badge-struct { background: #dcfce7; color: #15803d; }
+        .badge-func { background: #fef3c7; color: #92400e; }
+        .badge-event { background: #fce7f3; color: #9d174d; }
+        .badge-auto { background: #f1f5f9; color: #64748b; }
+
+        .flow-diagram {
+            background: #f8fafc;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 24px;
+            margin: 16px 0;
+            text-align: center;
+        }
+
+        .flow-diagram .flow-box {
+            display: inline-block;
+            padding: 10px 20px;
+            margin: 4px 8px;
+            border-radius: 8px;
+            font-size: 0.9em;
+            font-weight: 500;
+        }
+
+        .flow-box-blue { background: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd; }
+        .flow-box-green { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
+        .flow-box-orange { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+        .flow-box-purple { background: #f3e8ff; color: #7c3aed; border: 1px solid #c4b5fd; }
+
+        .flow-arrow {
+            display: inline-block;
+            color: var(--text-secondary);
+            font-size: 1.2em;
+            margin: 0 4px;
+            vertical-align: middle;
+        }
+
+        .note {
+            background: #fffbeb;
+            border-left: 4px solid #f59e0b;
+            padding: 12px 16px;
+            border-radius: 0 8px 8px 0;
+            margin: 12px 0;
+            font-size: 0.92em;
+        }
+
+        .note-info {
+            background: #ecfeff;
+            border-left-color: #06b6d4;
+        }
+
+        .toc {
+            position: sticky;
+            top: 20px;
+        }
+
+        .toc-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .toc-list li {
+            margin-bottom: 8px;
+        }
+
+        .toc-list a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.92em;
+            transition: color 0.2s;
+        }
+
+        .toc-list a:hover {
+            color: var(--primary);
+        }
+
+        .const-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 12px;
+            margin: 16px 0;
+        }
+
+        .const-item {
+            padding: 12px 16px;
+            background: #f8fafc;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+
+        .const-item .name { font-weight: 600; color: var(--primary); font-family: monospace; }
+        .const-item .value { color: var(--text-secondary); font-size: 0.9em; }
+
+        .arch-box {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 16px;
+            margin: 16px 0;
+        }
+
+        .arch-layer {
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .arch-layer h4 {
+            margin-bottom: 10px;
+            font-size: 1em;
+        }
+
+        .arch-layer .items {
+            font-size: 0.85em;
+            color: var(--text-secondary);
+            line-height: 1.8;
+        }
+
+        .layer-rpc { background: #dbeafe; border: 1px solid #93c5fd; }
+        .layer-logic { background: #dcfce7; border: 1px solid #86efac; }
+        .layer-data { background: #fef3c7; border: 1px solid #fcd34d; }
+
+        @media (max-width: 768px) {
+            .arch-box { grid-template-columns: 1fr; }
+            header h1 { font-size: 1.6em; }
+            .section { padding: 20px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>major.buildquicklist 模块详解</h1>
+            <p>建筑快捷队列系统 — majorserver 核心业务模块</p>
+        </header>
+
+        <!-- 目录 -->
+        <div class="section">
+            <h2>目录</h2>
+            <ul class="toc-list">
+                <li><a href="#overview">1. 模块概述</a></li>
+                <li><a href="#structure">2. 文件结构</a></li>
+                <li><a href="#architecture">3. 架构分层</a></li>
+                <li><a href="#interfaces">4. 接口定义</a></li>
+                <li><a href="#data">5. 数据层</a></li>
+                <li><a href="#logic">6. 核心业务逻辑</a></li>
+                <li><a href="#events">7. 事件系统</a></li>
+                <li><a href="#rpc">8. RPC 接口</a></li>
+                <li><a href="#constants">9. 常量与特殊队列</a></li>
+                <li><a href="#states">10. 状态机</a></li>
+                <li><a href="#gm">11. GM 命令</a></li>
+                <li><a href="#autogen">12. 自动生成代码</a></li>
+                <li><a href="#flow">13. 关键流程时序</a></li>
+            </ul>
+        </div>
+
+        <!-- 1. 模块概述 -->
+        <div class="section" id="overview">
+            <h2>1. 模块概述</h2>
+            <p>
+                <code>buildquicklist</code> 模块是 <strong>majorserver</strong> 中的核心业务模块，负责管理游戏中的<strong>建筑快捷队列系统</strong>（Building Quick List / Building Slot）。
+                该系统允许玩家拥有多个建造/研究/治疗等类型的工作队列槽位，每个槽位可以被激活（临时或永久）并执行对应类型的工作任务。
+            </p>
+            <p>模块的核心职责包括：</p>
+            <table>
+                <tr><th>职责</th><th>说明</th></tr>
+                <tr><td>队列槽位管理</td><td>创建、激活、关闭队列槽位</td></tr>
+                <tr><td>工作任务调度</td><td>向空闲槽位分配工作、注册定时任务、处理完成回调</td></tr>
+                <tr><td>时间加速</td><td>减少工作时间、重新调度定时器</td></tr>
+                <tr><td>联盟协助</td><td>公会帮助请求/响应、减免时间</td></tr>
+                <tr><td>状态推送</td><td>实时向客户端推送队列状态变更</td></tr>
+                <tr><td>GM 调试</td><td>强制完成、恢复异常队列等</td></tr>
+            </table>
+        </div>
+
+        <!-- 2. 文件结构 -->
+        <div class="section" id="structure">
+            <h2>2. 文件结构</h2>
+            <div class="file-tree">
+<span class="folder">majorserver/module/buildquicklist/</span>
+├── <span class="file">buildquicklist_def.go</span>       <span class="comment">// 公共常量与参数结构体定义</span>
+├── <span class="file">ibuildquicklist.go</span>          <span class="comment">// 接口定义（IInQuickListModule, IQuickListData, IQuickListUnit, IRpc...）</span>
+└── <span class="folder">buildquicklistimpl/</span>
+    ├── <span class="file">buildquicklist_in.go</span>         <span class="comment">// IInQuickListModule 实现（模块间调用入口）</span>
+    ├── <span class="file">buildquicklist_logic.go</span>      <span class="comment">// 核心业务逻辑（激活、工作、加速、取消、GM）</span>
+    ├── <span class="file">buildquicklist_obj.go</span>       <span class="comment">// IQuickListData 数据对象实现</span>
+    ├── <span class="file">buildquicklist_rpc.go</span>       <span class="comment">// RPC 接口实现（客户端请求处理）</span>
+    ├── <span class="file">buildquicklist_work.go</span>      <span class="comment">// 事件监听（公会帮助/加入/退出/科研完成）</span>
+    ├── <span class="auto">buildquicklist_obj_auto.go</span>  <span class="comment">// [自动生成] 数据对象池化与生命周期管理</span>
+    ├── <span class="auto">buildquicklist_pool_auto.go</span> <span class="comment">// [自动生成] RPC Handler 对象池</span>
+    └── <span class="auto">buildquicklist_inpool_auto.go</span><span class="comment">// [自动生成] InModule 对象池</span>
+            </div>
+        </div>
+
+        <!-- 3. 架构分层 -->
+        <div class="section" id="architecture">
+            <h2>3. 架构分层</h2>
+            <div class="arch-box">
+                <div class="arch-layer layer-rpc">
+                    <h4>RPC 层</h4>
+                    <div class="items">
+                        TRpcQuickListModule<br>
+                        GetBuildingListByTidReq<br>
+                        GetBuildingListByTypeReq<br>
+                        GetBuildingListReq<br>
+                        FirstActivateReq
+                    </div>
+                </div>
+                <div class="arch-layer layer-logic">
+                    <h4>业务逻辑层</h4>
+                    <div class="items">
+                        TInQuickListModule<br>
+                        onQuickListActive<br>
+                        onQuickListWork<br>
+                        onSubWorkTime<br>
+                        事件监听处理
+                    </div>
+                </div>
+                <div class="arch-layer layer-data">
+                    <h4>数据层</h4>
+                    <div class="items">
+                        TQuickListObj<br>
+                        QuickListUnitObj<br>
+                        tables.TQuickList<br>
+                        StoreGet / StoreUpdate
+                    </div>
+                </div>
+            </div>
+            <div class="note note-info">
+                <strong>设计模式：</strong>模块采用经典的 接口隔离 + 对象池 + 事件驱动 架构。
+                外部通过 <code>IInQuickListModule</code> 接口调用，内部通过事件总线解耦公会、科研等跨模块交互。
+            </div>
+        </div>
+
+        <!-- 4. 接口定义 -->
+        <div class="section" id="interfaces">
+            <h2>4. 接口定义</h2>
+            <p>所有外部可见的接口定义在 <code>ibuildquicklist.go</code> 中，遵循面向接口编程原则。</p>
+
+            <h3>4.1 IInQuickListModule <span class="badge badge-interface">模块间接口</span></h3>
+            <p>供其他模块调用的核心接口，是本模块对外暴露功能的唯一入口：</p>
+            <table>
+                <tr><th>方法</th><th>功能说明</th></tr>
+                <tr><td><code>QuickListIsIdLe(uid, bType, buildingId)</code></td><td>判断指定类型的队列是否有空闲槽位</td></tr>
+                <tr><td><code>OnQuickListWork(uid, bType, workState, buildingId, duration)</code></td><td>向空闲队列分配一项工作任务</td></tr>
+                <tr><td><code>OnQuickListDirectWorkCompleted(uid, bType, workState, buildingId)</code></td><td>直接完成工作（不等定时器，即时占用+释放）</td></tr>
+                <tr><td><code>OnQuickListWorkForListId(uid, quickListId, workState, buildingId, duration)</code></td><td>指定特定队列槽位分配工作</td></tr>
+                <tr><td><code>OnQuickListAction(uid, tableId, state, duration)</code></td><td>激活/变更队列槽位状态</td></tr>
+                <tr><td><code>OnSubWorkTime(uid, tableId, subTime)</code></td><td>减少指定队列的工作时间（加速）</td></tr>
+                <tr><td><code>OnSubWorkTimeInQuickList(uid, subTime)</code></td><td>减少所有建造类型队列的工作时间</td></tr>
+                <tr><td><code>OnCancelWork(uid, tableId)</code></td><td>取消指定队列的当前工作</td></tr>
+                <tr><td><code>DirectDeleteComplete(uid, instanceId)</code></td><td>直接完成拆除操作</td></tr>
+                <tr><td><code>GmForceFinishAllNeed(uid)</code></td><td>GM: 强制完成所有超时队列</td></tr>
+                <tr><td><code>CloseQuickListActiveOnIdle(uid, tableId)</code></td><td>空闲时关闭队列激活状态</td></tr>
+                <tr><td><code>GmTestCopyQuickList(uid, scrTid, desTid)</code></td><td>GM: 测试用复制队列数据</td></tr>
+            </table>
+
+            <h3>4.2 IQuickListData <span class="badge badge-interface">数据查询接口</span></h3>
+            <p>玩家队列数据的查询接口：</p>
+            <table>
+                <tr><th>方法</th><th>说明</th></tr>
+                <tr><td><code>GetQuickListUnitByTableId(tableId)</code></td><td>按配置ID查找队列单元</td></tr>
+                <tr><td><code>GetQuickListUnitByBuildingId(buildingId)</code></td><td>按建筑实例ID查找关联队列</td></tr>
+                <tr><td><code>GetQuickListUnitByType(uType)</code></td><td>按槽位类型查找队列列表</td></tr>
+                <tr><td><code>GetQuickListUnitArray()</code></td><td>获取所有队列单元</td></tr>
+                <tr><td><code>GmForceFinishAllNeed()</code></td><td>GM强制完成超时队列</td></tr>
+                <tr><td><code>CheckQuickErrIds()</code></td><td>检测异常（超时未完成）队列ID</td></tr>
+            </table>
+
+            <h3>4.3 IQuickListUnit <span class="badge badge-interface">队列单元接口</span></h3>
+            <p>单个队列槽位的操作接口，包含激活状态和工作状态两个维度的管理：</p>
+            <pre><code><span class="keyword">type</span> <span class="type">IQuickListUnit</span> <span class="keyword">interface</span> {
+    <span class="comment-code">// 基础属性</span>
+    GetTableId() uint32
+    GetType() pb.EBuildingSlotType
+    GetDuration() int64
+    GetBuildingId() uint32
+
+    <span class="comment-code">// 激活管理</span>
+    GetActiveInfo() *pb.TBuildingSlotActivate
+    StartActive(state int32, duration int64, taskId string)
+    StopActive()
+    ReSchedActivite(state int32, duration int64)
+
+    <span class="comment-code">// 工作管理</span>
+    GetWorkInfo() *pb.TBuildingSlotWork
+    StartWork(buildingId, curTime, duration, state, workState, taskId, curTimeMs)
+    StopWork()
+    SubWorkTime(duration int64)
+    ChangeSlotWorkState(state pb.EBuildingSlotWorkState)
+
+    <span class="comment-code">// 公会协助</span>
+    OnGuildApplyHelp()
+    OnGuildHelp()
+
+    <span class="comment-code">// 序列化</span>
+    ToProto() *pb.TBuildingSlotInfo
+}</code></pre>
+
+            <h3>4.4 IRpcQuickListModule <span class="badge badge-interface">RPC接口</span></h3>
+            <p>暴露给客户端的网络请求接口。</p>
+        </div>
+
+        <!-- 5. 数据层 -->
+        <div class="section" id="data">
+            <h2>5. 数据层</h2>
+
+            <h3>5.1 TQuickListObj</h3>
+            <p>玩家队列的数据实体对象，封装了对 <code>tables.TQuickList</code> 数据库表的操作。</p>
+
+            <pre><code><span class="keyword">type</span> <span class="type">TQuickListObj</span> <span class="keyword">struct</span> {
+    TDataObjInner
+    dbStruct *tables.TQuickList   <span class="comment-code">// 数据库映射结构</span>
+    context  *majorserver.TContext <span class="comment-code">// 请求上下文</span>
+}</code></pre>
+
+            <h3>5.2 数据加载流程</h3>
+            <p><code>findQuickListData</code> 函数是数据加载的核心入口：</p>
+            <ol style="padding-left: 20px; margin: 12px 0; color: var(--text-secondary);">
+                <li>尝试从数据库读取玩家的队列数据（<code>StoreGet</code>）</li>
+                <li>若不存在（首次），则初始化并插入数据库（<code>StoreInsert</code>）</li>
+                <li>根据配置表 <code>ConfQuickQueue</code> 遍历所有应有的队列槽位</li>
+                <li>对于配置中存在但数据中缺失的槽位，自动创建（确保配置扩展时自动补全）</li>
+                <li>重置数据变更标记后返回数据对象</li>
+            </ol>
+
+            <div class="note">
+                <strong>注意：</strong>每次加载数据时都会与配置表对比，自动补全缺失的队列槽位，保证了配置热更新时的数据兼容性。
+            </div>
+
+            <h3>5.3 对象池化</h3>
+            <p>
+                <code>TQuickListObj</code> 使用 <code>sync.Pool</code> 进行对象池化管理（<code>buildquicklist_obj_auto.go</code>），
+                通过 <code>NewTQuickListObj()</code> 从池中获取、<code>Release()</code> 归还池中，减少 GC 压力。
+                生命周期方法包括 <code>CheckUpdate</code>、<code>Update</code>、<code>Release</code>、<code>Put</code>等。
+            </p>
+        </div>
+
+        <!-- 6. 核心业务逻辑 -->
+        <div class="section" id="logic">
+            <h2>6. 核心业务逻辑</h2>
+
+            <h3>6.1 队列激活 — <code>onQuickListActive</code></h3>
+            <p>处理队列槽位的激活状态变更，支持以下状态转换：</p>
+            <table>
+                <tr><th>目标状态</th><th>处理逻辑</th></tr>
+                <tr>
+                    <td><code>ESlotActivateStateNo</code></td>
+                    <td>从 Hide 状态转为未激活（用于显示控制）</td>
+                </tr>
+                <tr>
+                    <td><code>ESlotActivateStateForever</code></td>
+                    <td>永久激活，无需定时器回收</td>
+                </tr>
+                <tr>
+                    <td><code>ESlotActivateStateTemporary</code></td>
+                    <td>临时激活：首次注册定时任务 <code>Task_QuickListActive</code>，到期自动停止；重复激活时累加时长并重新调度定时器</td>
+                </tr>
+            </table>
+
+            <h3>6.2 工作任务分配 — <code>onQuickListWork</code></h3>
+            <div class="flow-diagram">
+                <span class="flow-box flow-box-blue">查找空闲槽位</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-box flow-box-green">注册定时任务</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-box flow-box-orange">计算工作状态</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-box flow-box-purple">StartWork & Push</span>
+            </div>
+            <p>关键实现细节：</p>
+            <ul style="padding-left: 20px; margin: 12px 0; color: var(--text-secondary);">
+                <li>通过 <code>_getIdleQuickListUnit</code> 按类型查找空闲、已激活的槽位</li>
+                <li>科研类型特殊处理：通过 <code>_getIdLeScienceListUnit</code> 按建筑映射到固定队列ID</li>
+                <li>使用 <code>task.Add</code> 注册毫秒级精度的定时任务</li>
+                <li>最小工作时长保证为 1 秒（<code>duration <= 0</code> 时兜底）</li>
+                <li>通过 <code>_calSlotWorkState</code> 计算是否可请求公会帮助</li>
+            </ul>
+
+            <h3>6.3 工作完成回调 — <code>taskWorkCompleted</code></h3>
+            <pre><code><span class="keyword">func</span> <span class="func">taskWorkCompleted</span>(params WorkCompleteParams) error {
+    <span class="comment-code">// 带重试的异步处理（5次重试，1秒间隔）</span>
+    majorserver.CtxRunProcessFuncRetryWithLockTimeout(...)
+    <span class="comment-code">// 1. 锁定用户数据</span>
+    <span class="comment-code">// 2. 校验 BuildingInsId 一致性（防止取消后残留定时器触发）</span>
+    <span class="comment-code">// 3. 派发 EventQuickListWorkCompleted 事件</span>
+    <span class="comment-code">// 4. 停止工作、推送状态</span>
+}</code></pre>
+
+            <h3>6.4 时间加速 — <code>onSubWorkTime</code></h3>
+            <p>支持对指定队列或所有建造队列进行时间减免：</p>
+            <ul style="padding-left: 20px; margin: 12px 0; color: var(--text-secondary);">
+                <li>修改队列单元的剩余时间 <code>SubWorkTime</code></li>
+                <li>重新计算结束时间，调用 <code>task.ReSched</code> 更新定时器</li>
+                <li>若加速后已超时，立即将定时器调度到当前时间（触发完成）</li>
+                <li>派发加速事件 <code>EventQuickListWorkTimeChange</code></li>
+            </ul>
+
+            <h3>6.5 取消工作 — <code>onCancelWork</code></h3>
+            <p>取消队列当前工作：删除定时任务、停止工作状态、推送更新。</p>
+
+            <h3>6.6 空闲槽位查找 — <code>_getIdleQuickListUnit</code></h3>
+            <p>查找算法：遍历指定类型的所有槽位，筛选出激活且空闲的槽位，若有多个空闲则按配置的 <code>Sort</code> 字段排序后取第一个。</p>
+
+            <h3>6.7 工作状态计算 — <code>_calSlotWorkState</code></h3>
+            <p>根据以下条件判定槽位的工作子状态：</p>
+            <pre><code><span class="comment-code">// 优先级从高到低：</span>
+1. 未激活 → 保持当前状态
+2. 支持联盟帮助 & 有公会 & 治疗队列额度判定 → BusyHelp
+3. 免费加速时间 > 0 → BusyFree
+4. 默认 → BusyNoHelp</code></pre>
+        </div>
+
+        <!-- 7. 事件系统 -->
+        <div class="section" id="events">
+            <h2>7. 事件系统</h2>
+            <p>模块通过事件总线与其他模块解耦交互，在 <code>buildquicklist_work.go</code> 的 <code>init()</code> 中注册监听：</p>
+
+            <table>
+                <tr><th>事件</th><th>处理函数</th><th>说明</th></tr>
+                <tr>
+                    <td><code>EventGuildHelp</code><br><code>EventFakeGuildHelp</code></td>
+                    <td><code>OnGuildHelp</code></td>
+                    <td>收到公会成员帮助后，减免队列工作时间</td>
+                </tr>
+                <tr>
+                    <td><code>EventGuildJoin</code></td>
+                    <td><code>OnGuildJoin</code></td>
+                    <td>玩家加入公会时：激活公会捐献队列、刷新所有槽位的可帮助状态</td>
+                </tr>
+                <tr>
+                    <td><code>EventGuildApplyHelp</code></td>
+                    <td><code>OnGuildApplyHelp</code></td>
+                    <td>玩家发起帮助请求时：标记槽位进入帮助状态</td>
+                </tr>
+                <tr>
+                    <td><code>EventScienceQuickListCompleted</code></td>
+                    <td><code>OnScienceResearchCompleted</code></td>
+                    <td>科研即时完成时：停止对应研究队列的工作状态</td>
+                </tr>
+                <tr>
+                    <td><code>EventGuildQuit</code></td>
+                    <td><code>OnGuildQuit</code></td>
+                    <td>玩家退出公会：处理联盟捐献快捷队列状态改变</td>
+                </tr>
+            </table>
+
+            <h3>注册的定时任务</h3>
+            <table>
+                <tr><th>任务名</th><th>回调</th><th>触发场景</th></tr>
+                <tr>
+                    <td><code>Task_QuickListActive</code></td>
+                    <td><code>taskActiveCompleted</code></td>
+                    <td>临时激活到期时：停止激活，推送变更，派发 <code>EventQuickListWorkTimeOver</code></td>
+                </tr>
+                <tr>
+                    <td><code>Task_QuickListWork</code></td>
+                    <td><code>taskWorkCompleted</code></td>
+                    <td>工作完成时：校验一致性，派发完成事件，释放槽位</td>
+                </tr>
+            </table>
+        </div>
+
+        <!-- 8. RPC 接口 -->
+        <div class="section" id="rpc">
+            <h2>8. RPC 接口</h2>
+            <p>客户端可调用的网络接口定义在 <code>TRpcQuickListModule</code> 中：</p>
+
+            <table>
+                <tr><th>接口</th><th>请求</th><th>功能</th></tr>
+                <tr>
+                    <td><code>GetBuildingListByTidReq</code></td>
+                    <td>传入 tid 数组</td>
+                    <td>按配置ID批量查询队列信息</td>
+                </tr>
+                <tr>
+                    <td><code>GetBuildingListByTypeReq</code></td>
+                    <td>传入 type</td>
+                    <td>按槽位类型查询队列列表</td>
+                </tr>
+                <tr>
+                    <td><code>GetBuildingListReq</code></td>
+                    <td>无参</td>
+                    <td>查询玩家所有队列信息</td>
+                </tr>
+                <tr>
+                    <td><code>FirstActivateReq</code></td>
+                    <td>传入 tid</td>
+                    <td>首次免费激活：消耗指定道具激活队列</td>
+                </tr>
+            </table>
+
+            <div class="note note-info">
+                <strong>通用模式：</strong>所有 RPC 方法都遵循 "获取上下文 → 锁定用户数据 → 查询/操作 → 返回响应" 的标准流程。
+            </div>
+
+            <h3>推送通知</h3>
+            <p>队列状态变更时通过 <code>_pushQuickListUnit</code> 向客户端推送：</p>
+            <pre><code><span class="comment-code">// 推送消息名：push.OnBuildingListRspNotify</span>
+<span class="comment-code">// 内容：变更的 TBuildingSlotInfo 列表</span>
+context.SendMsg(uid, "push.OnBuildingListRspNotify", notify)</code></pre>
+        </div>
+
+        <!-- 9. 常量与特殊队列 -->
+        <div class="section" id="constants">
+            <h2>9. 常量与特殊队列</h2>
+            <p>在 <code>buildquicklist_def.go</code> 中定义了特殊队列的 TableId 常量：</p>
+            <div class="const-grid">
+                <div class="const-item">
+                    <div class="name">HERODRAWCARD1</div>
+                    <div class="value">= 10（英雄抽卡队列1）</div>
+                </div>
+                <div class="const-item">
+                    <div class="name">HERODRAWCARD2</div>
+                    <div class="value">= 11（英雄抽卡队列2）</div>
+                </div>
+                <div class="const-item">
+                    <div class="name">HERODRAWCARD4</div>
+                    <div class="value">= 17（英雄抽卡队列4）</div>
+                </div>
+                <div class="const-item">
+                    <div class="name">HOSPITALQUICK</div>
+                    <div class="value">= 9（医院快捷队列）</div>
+                </div>
+                <div class="const-item">
+                    <div class="name">WAREHOUSEGETREWARD</div>
+                    <div class="value">= 18（仓库领奖队列）</div>
+                </div>
+                <div class="const-item">
+                    <div class="name">GUILDDORATION</div>
+                    <div class="value">= 19（公会捐献队列）</div>
+                </div>
+                <div class="const-item">
+                    <div class="name">GUILD_BUILD_HELP</div>
+                    <div class="value">= 21（公会建造帮助队列）</div>
+                </div>
+            </div>
+
+            <h3>参数结构体</h3>
+            <pre><code><span class="keyword">type</span> <span class="type">ActiveCompleteParams</span> <span class="keyword">struct</span> {
+    Uid     uint64  <span class="comment-code">// 玩家ID</span>
+    TableId uint32  <span class="comment-code">// 队列配置ID</span>
+}
+
+<span class="keyword">type</span> <span class="type">WorkCompleteParams</span> <span class="keyword">struct</span> {
+    Uid           uint64      <span class="comment-code">// 玩家ID</span>
+    TableId       uint32      <span class="comment-code">// 队列配置ID</span>
+    BuildingInsId uint32      <span class="comment-code">// 建筑实例ID</span>
+    ExtData       interface{} <span class="comment-code">// 扩展数据</span>
+}</code></pre>
+        </div>
+
+        <!-- 10. 状态机 -->
+        <div class="section" id="states">
+            <h2>10. 状态机</h2>
+
+            <h3>10.1 激活状态（EBuildingSlotActivateState）</h3>
+            <div class="flow-diagram">
+                <span class="flow-box flow-box-blue">Hide（隐藏）</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-box flow-box-green">No（未激活/可见）</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-box flow-box-orange">Temporary（临时激活）</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-box flow-box-purple">Forever（永久激活）</span>
+            </div>
+            <p>状态只能单向升级（<code>curState > targetState</code> 会拒绝），临时激活支持叠加时长。</p>
+
+            <h3>10.2 工作状态（EBuildingSlotWorkState）</h3>
+            <table>
+                <tr><th>状态</th><th>含义</th></tr>
+                <tr><td><code>ESlotWorkStateIdle</code></td><td>空闲，可分配新工作</td></tr>
+                <tr><td><code>ESlotWorkStateBusyHelp</code></td><td>工作中，可请求联盟帮助</td></tr>
+                <tr><td><code>ESlotWorkStateBusyNoHelp</code></td><td>工作中，不可帮助（已帮助或无公会）</td></tr>
+                <tr><td><code>ESlotWorkStateBusyFree</code></td><td>工作中，免费加速可用</td></tr>
+            </table>
+
+            <h3>10.3 工作类型（EBuildingState — workState）</h3>
+            <p>记录在 <code>WorkInfo.WorkState</code> 中，标识当前队列执行的具体操作类型，如：</p>
+            <ul style="padding-left: 20px; color: var(--text-secondary);">
+                <li><code>Normal</code> — 无工作（空闲标记）</li>
+                <li><code>UnlockLandBox</code> — 解锁地块（在 buildingId 查找时会被跳过）</li>
+                <li><code>Delete</code> — 拆除建筑</li>
+                <li>其他建造、升级、研究、治疗等状态...</li>
+            </ul>
+        </div>
+
+        <!-- 11. GM 命令 -->
+        <div class="section" id="gm">
+            <h2>11. GM 命令</h2>
+            <table>
+                <tr><th>函数</th><th>功能</th></tr>
+                <tr>
+                    <td><code>GM_recoverAllQuickList</code></td>
+                    <td>恢复玩家所有队列：强制停止所有进行中的工作，重置为空闲状态</td>
+                </tr>
+                <tr>
+                    <td><code>GM_activeHospitalQuickList</code></td>
+                    <td>永久激活医院快捷队列（TableId=9）</td>
+                </tr>
+                <tr>
+                    <td><code>GmForceFinishAllNeed</code></td>
+                    <td>强制完成所有"有 taskId 但已超时30秒"的队列任务</td>
+                </tr>
+                <tr>
+                    <td><code>CheckQuickErrIds</code></td>
+                    <td>检测所有"有 taskId 但已超时2000秒"的异常队列（用于监控告警）</td>
+                </tr>
+                <tr>
+                    <td><code>GmTestCopyQuickList</code></td>
+                    <td>测试工具：将一个队列的工作数据复制到另一个队列</td>
+                </tr>
+            </table>
+        </div>
+
+        <!-- 12. 自动生成代码 -->
+        <div class="section" id="autogen">
+            <h2>12. 自动生成代码</h2>
+            <p>以下文件由代码生成工具 <code>auto_code/</code> 自动生成，不应手动修改：</p>
+
+            <table>
+                <tr><th>文件</th><th>生成器</th><th>职责</th></tr>
+                <tr>
+                    <td><code>buildquicklist_pool_auto.go</code></td>
+                    <td>auto_code_rpc.go</td>
+                    <td>RPC Handler 对象池：<code>TRpcQuickListModule</code> 的 <code>sync.Pool</code> 注册与回收</td>
+                </tr>
+                <tr>
+                    <td><code>buildquicklist_obj_auto.go</code></td>
+                    <td>auto_code_data.go</td>
+                    <td>数据对象生命周期：<code>NewTQuickListObj</code>、<code>CheckUpdate</code>、<code>Update</code>、<code>Release</code>、权限控制等</td>
+                </tr>
+                <tr>
+                    <td><code>buildquicklist_inpool_auto.go</code></td>
+                    <td>auto_code_data.go</td>
+                    <td>InModule 对象池：<code>TInQuickListModule</code> 的 <code>sync.Pool</code> 注册</td>
+                </tr>
+            </table>
+
+            <div class="note">
+                <strong>设计目的：</strong>自动生成代码将通用的对象池化、数据持久化、权限检查等模板化逻辑从业务代码中分离，
+                保持业务代码（_in.go, _logic.go, _work.go）专注于核心逻辑。
+            </div>
+        </div>
+
+        <!-- 13. 关键流程时序 -->
+        <div class="section" id="flow">
+            <h2>13. 关键流程时序</h2>
+
+            <h3>13.1 分配工作任务流程</h3>
+            <pre><code>外部模块调用
+    │
+    ▼
+IInQuickListModule.OnQuickListWork(uid, type, workState, buildingId, duration)
+    │
+    ├─ type == Study? ──→ _getIdLeScienceListUnit (按建筑映射队列ID)
+    │                          │
+    └─ otherwise ────→ _getIdleQuickListUnit (按类型+激活+空闲筛选)
+                               │
+                               ▼
+                    找到空闲 quickUnit
+                               │
+                               ▼
+                    onQuickListWork(context, uid, workState, quickUnit, buildingId, duration)
+                               │
+                    ┌──────────┼──────────┐
+                    │          │          │
+                    ▼          ▼          ▼
+            task.Add()   StartWork()   _pushQuickListUnit()
+          (注册定时器)  (更新状态)    (推送客户端)
+                    │
+                    ▼ (duration秒后)
+            taskWorkCompleted()
+                    │
+                    ├─ 校验 BuildingInsId
+                    ├─ DispatchEvent(EventQuickListWorkCompleted)
+                    ├─ StopWork()
+                    └─ _pushQuickListUnit()</code></pre>
+
+            <h3>13.2 联盟帮助加速流程</h3>
+            <pre><code>公会成员点击帮助
+    │
+    ▼
+EventGuildHelp 事件触发
+    │
+    ▼
+OnGuildHelp()
+    ├─ 查找 applyUid 的对应队列
+    ├─ 校验状态 == BusyNoHelp
+    ├─ unit.OnGuildHelp() (标记已帮助)
+    └─ onSubWorkTime(context, applyUid, tableId, reduceTime, false)
+            │
+            ├─ SubWorkTime (减少剩余时间)
+            ├─ 计算新的结束时间
+            │       │
+            │       ├─ 未超时 → task.ReSched(新结束时间)
+            │       └─ 已超时 → task.ReSched(当前时间) // 立即触发完成
+            │
+            └─ _pushQuickListUnit() (推送状态更新)</code></pre>
+
+            <h3>13.3 临时激活叠加流程</h3>
+            <pre><code>使用激活道具
+    │
+    ▼
+OnQuickListAction(uid, tableId, Temporary, duration)
+    │
+    ▼
+onQuickListActive()
+    │
+    ├─ 首次临时激活:
+    │       ├─ task.Add(Task_QuickListActive, endTime)
+    │       └─ StartActive(Temporary, duration, taskId)
+    │
+    └─ 已是临时激活(叠加):
+            ├─ duration += existingDuration
+            ├─ ReSchedActivite(Temporary, newDuration)
+            └─ task.ReSched(activeTaskId, newEndTime)</code></pre>
+        </div>
+
+        <!-- 页脚 -->
+        <footer style="text-align: center; padding: 40px 0; color: var(--text-secondary); font-size: 0.9em;">
+            <p>基于 <code>D:\c_server\majorserver\module\buildquicklist</code> 源码分析生成</p>
+            <p>生成时间：2026-05-28</p>
+        </footer>
+    </div>
+</body>
+</html>
